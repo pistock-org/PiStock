@@ -46,6 +46,8 @@ class PLM(SQLModel, table=True):
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
+    # Auteur de cette révision (renseigné par le GUI de la macro).
+    author: str | None = None
 
 
 @app.on_event("startup")
@@ -55,21 +57,49 @@ def on_startup():
     logger.info("Base de donnees initialisee.")
 
 
+@app.get("/api/v1/parts")
+def list_parts():
+    """
+    Renvoie la liste de toutes les pièces existantes.
+    Utilisé par le GUI de la macro FreeCAD pour peupler le menu
+    déroulant "associer à une pièce existante".
+    """
+    with Session(engine) as session:
+        parts = session.exec(select(Parts).order_by(Parts.part_name)).all()
+        return [
+            {"id": p.id, "part_name": p.part_name}
+            for p in parts
+        ]
+
+
 @app.post("/api/v1/parts/upload")
 async def upload_new_part(
-    part_name: str = Form(...),
+    # L'utilisateur choisit dans le GUI :
+    #  - soit une pièce EXISTANTE  -> il envoie 'part_id'
+    #  - soit une NOUVELLE pièce   -> il envoie 'part_name'
+    # Les deux champs sont optionnels ; le serveur tranche selon
+    # ce qu'il reçoit. Au moins l'un des deux est obligatoire.
+    part_id: int | None = Form(default=None),
+    part_name: str | None = Form(default=None),
+    # Auteur de cet export (saisi dans le GUI).
+    author: str = Form(...),
     cad_file: UploadFile = File(...),
     thumbnail_file: UploadFile = File(...),
     glb_file: UploadFile = File(...),
 ):
     try:
+        # Validation : il faut au moins un identifiant de pièce.
+        if part_id is None and not part_name:
+            raise HTTPException(
+                status_code=400,
+                detail="Il faut fournir soit 'part_id' (pièce "
+                       "existante), soit 'part_name' (nouvelle pièce).",
+            )
+
         # --- TIMESTAMP UNIQUE DE CET ENREGISTREMENT ---------------------
         # Généré ICI, côté serveur, au moment de la réception.
-        # La MÊME valeur sert pour les noms de fichiers ET pour la base,
-        # ce qui garantit leur cohérence parfaite.
+        # La MÊME valeur sert pour les noms de fichiers ET pour la base.
         ts_dt = datetime.now(timezone.utc)
-        # Version "compacte" pour les noms de fichiers (ex: 20260527_143052).
-        # Pas de ':' ni d'espace -> noms valides sur tous les systèmes.
         ts_tag = ts_dt.strftime("%Y%m%d_%H%M%S")
         logger.info(f"Timestamp de l'enregistrement : {ts_tag}")
         # ----------------------------------------------------------------
@@ -82,9 +112,8 @@ async def upload_new_part(
             ("glb", glb_file, "cad"),
         ]:
             dest_dir = os.path.join(DATA_DIR, "uploads", sub_folder)
-            os.makedirs(dest_dir, exist_ok=True)  # securite supplementaire
+            os.makedirs(dest_dir, exist_ok=True)
 
-            # On insère le timestamp dans le nom du fichier :
             # "monfichier.FCStd" -> "monfichier_20260527_143052.FCStd"
             base_name, extension = os.path.splitext(upload_file.filename)
             stamped_name = f"{base_name}_{ts_tag}{extension}"
@@ -93,66 +122,81 @@ async def upload_new_part(
             with open(file_path, "wb") as buffer:
                 copyfileobj(upload_file.file, buffer)
 
-            # Stockage du chemin relatif pour la base de donnees
             saved_paths[file_type] = f"uploads/{sub_folder}/{stamped_name}"
             logger.info(f"Fichier sauvegarde : {file_path}")
 
         # 2. Insertion dans la base de donnees SQLite via SQLModel
         with Session(engine) as session:
-            # Etape A : on cherche si une pièce de ce nom existe déjà.
-            existing_part = session.exec(
-                select(Parts).where(Parts.part_name == part_name)
-            ).first()
-
-            if existing_part:
-                # La pièce existe déjà : on ne touche PAS à la table
-                # 'parts', on réutilise simplement son id.
-                part = existing_part
+            # Etape A : déterminer la pièce concernée.
+            if part_id is not None:
+                # CAS 1 : l'utilisateur a choisi une pièce existante.
+                # On l'identifie par son id (fiable, pas par le nom).
+                part = session.get(Parts, part_id)
+                if part is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Aucune pièce avec l'id {part_id}.",
+                    )
                 part_created = False
-                logger.info(f"Pièce '{part_name}' déjà connue "
-                            f"(id={part.id}), réutilisation.")
+                logger.info(f"Pièce existante sélectionnée : "
+                            f"'{part.part_name}' (id={part.id}).")
             else:
-                # Nouvelle pièce : on l'ajoute dans 'parts'.
-                part = Parts(part_name=part_name)
-                session.add(part)
-                session.flush()  # genere l'ID sans committer definitivement
-                part_created = True
-                logger.info(f"Nouvelle pièce '{part_name}' "
-                            f"créée (id={part.id}).")
+                # CAS 2 : nouvelle pièce. On vérifie quand même que le
+                # nom n'existe pas déjà (sécurité : contrainte unique).
+                existing = session.exec(
+                    select(Parts).where(Parts.part_name == part_name)
+                ).first()
+                if existing:
+                    # Le nom existe déjà : on réutilise plutôt que
+                    # de planter sur la contrainte d'unicité.
+                    part = existing
+                    part_created = False
+                    logger.info(f"Pièce '{part_name}' déjà connue "
+                                f"(id={part.id}), réutilisation.")
+                else:
+                    part = Parts(part_name=part_name)
+                    session.add(part)
+                    session.flush()
+                    part_created = True
+                    logger.info(f"Nouvelle pièce '{part_name}' "
+                                f"créée (id={part.id}).")
 
-            # Etape B : dans TOUS les cas, on ajoute une nouvelle ligne
-            # dans 'plm' avec le timestamp de cet enregistrement.
+            # Etape B : dans TOUS les cas, nouvelle ligne dans 'plm'.
             new_plm = PLM(
                 id_parts=part.id,
                 path_2_cadfile=saved_paths["cad"],
                 path_2_thumbnail=saved_paths["img"],
                 path_2_3dglb=saved_paths["glb"],
                 timestamp=ts_dt,
+                author=author,
             )
             session.add(new_plm)
-            session.commit()  # commit unique
+            session.commit()
 
-            # On capture les ID AVANT de sortir du bloc with
-            # (sinon DetachedInstanceError : l'objet n'est plus lie a la session)
-            part_id = part.id
+            part_id_final = part.id
+            part_name_final = part.part_name
             plm_id = new_plm.id
 
         return {
             "status": "success",
-            "part_id": part_id,
+            "part_id": part_id_final,
+            "part_name": part_name_final,
             "plm_id": plm_id,
             "part_created": part_created,
+            "author": author,
             "timestamp": ts_dt.isoformat(),
             "message": (
-                f"Part '{part_name}' successfully cataloged!"
+                f"Part '{part_name_final}' successfully cataloged!"
                 if part_created
-                else f"Part '{part_name}' already existed - "
-                     f"new PLM revision added."
+                else f"New PLM revision added to part "
+                     f"'{part_name_final}'."
             ),
         }
 
+    except HTTPException:
+        # On laisse passer les erreurs HTTP explicites (400, 404...)
+        raise
     except Exception as e:
-        # On logge le traceback complet cote serveur pour le debug
         tb = traceback.format_exc()
         logger.error(f"Erreur lors de l'upload :\n{tb}")
         raise HTTPException(status_code=500, detail=str(e))

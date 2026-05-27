@@ -1,13 +1,179 @@
 import os
+import json
+import getpass
 import tempfile
 import uuid
 import urllib.request
+import urllib.error
 import FreeCAD as App
 import FreeCADGui as Gui
+from PySide6 import QtWidgets, QtCore
 
 # Configuration de l'adresse de votre serveur FastAPI
-API_URL = "http://127.0.0.1:8000/api/v1/parts/upload"
+API_BASE = "http://127.0.0.1:8000/api/v1"
+API_LIST = f"{API_BASE}/parts"            # GET  : liste des pièces
+API_UPLOAD = f"{API_BASE}/parts/upload"   # POST : envoi d'un export
 
+# Emplacement où FreeCAD mémorise le dernier auteur saisi.
+# 'App.ParamGet' stocke ça de façon persistante dans la config
+# de FreeCAD : la valeur survit donc d'un export à l'autre et
+# même après redémarrage de FreeCAD.
+PARAM_PATH = "User parameter:BaseApp/Preferences/Mod/PiStock"
+
+
+# ----------------------------------------------------------------------
+#  MÉMORISATION DE L'AUTEUR (préférences FreeCAD)
+# ----------------------------------------------------------------------
+def get_remembered_author():
+    """Renvoie le dernier auteur saisi. Au tout premier lancement
+    (aucune valeur mémorisée), retombe sur le nom système."""
+    params = App.ParamGet(PARAM_PATH)
+    # 2e argument = valeur par défaut si la clé n'existe pas encore
+    return params.GetString("LastAuthor", getpass.getuser())
+
+
+def remember_author(author):
+    """Mémorise l'auteur pour qu'il soit pré-rempli au prochain export."""
+    params = App.ParamGet(PARAM_PATH)
+    params.SetString("LastAuthor", author)
+
+
+# ----------------------------------------------------------------------
+#  COMMUNICATION AVEC L'API
+# ----------------------------------------------------------------------
+def fetch_existing_parts():
+    """Récupère la liste des pièces déjà présentes dans la base.
+    Retourne une liste de dicts {id, part_name}, ou [] si échec."""
+    try:
+        with urllib.request.urlopen(API_LIST, timeout=5) as response:
+            data = response.read().decode("utf-8")
+            return json.loads(data)
+    except Exception as e:
+        App.Console.PrintWarning(
+            f"⚠️  Impossible de récupérer la liste des pièces : {e}\n"
+        )
+        return []
+
+
+# ----------------------------------------------------------------------
+#  BOITE DE DIALOGUE PySide6
+# ----------------------------------------------------------------------
+class PiStockExportDialog(QtWidgets.QDialog):
+    """Fenêtre qui demande à quelle pièce associer l'export
+    (existante ou nouvelle) et le nom de l'auteur."""
+
+    def __init__(self, default_part_name, existing_parts, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("PiStock — Export vers la base")
+        self.setMinimumWidth(400)
+
+        self.existing_parts = existing_parts  # [{id, part_name}, ...]
+        # Résultat rempli à la validation :
+        self.result_part_id = None     # int   -> pièce existante
+        self.result_part_name = None   # str   -> nouvelle pièce
+        self.result_author = None      # str
+
+        layout = QtWidgets.QVBoxLayout(self)
+
+        # --- Choix : nouvelle pièce OU pièce existante ---------------
+        self.radio_new = QtWidgets.QRadioButton("Créer une nouvelle pièce")
+        self.radio_existing = QtWidgets.QRadioButton(
+            "Associer à une pièce existante"
+        )
+        layout.addWidget(self.radio_new)
+
+        # Champ nom de la nouvelle pièce (pré-rempli avec le doc FreeCAD)
+        self.new_name_edit = QtWidgets.QLineEdit(default_part_name)
+        new_name_row = QtWidgets.QHBoxLayout()
+        new_name_row.addWidget(QtWidgets.QLabel("    Nom :"))
+        new_name_row.addWidget(self.new_name_edit)
+        layout.addLayout(new_name_row)
+
+        layout.addWidget(self.radio_existing)
+
+        # Menu déroulant des pièces existantes
+        self.existing_combo = QtWidgets.QComboBox()
+        for part in existing_parts:
+            # On stocke l'id de la pièce comme "donnée" de l'item
+            self.existing_combo.addItem(part["part_name"], part["id"])
+        existing_row = QtWidgets.QHBoxLayout()
+        existing_row.addWidget(QtWidgets.QLabel("    Pièce :"))
+        existing_row.addWidget(self.existing_combo)
+        layout.addLayout(existing_row)
+
+        # --- Champ auteur --------------------------------------------
+        layout.addSpacing(8)
+        author_row = QtWidgets.QHBoxLayout()
+        author_row.addWidget(QtWidgets.QLabel("Auteur :"))
+        # Pré-rempli avec le dernier auteur saisi (mémorisé entre
+        # les exports). Au tout premier lancement : nom système.
+        self.author_edit = QtWidgets.QLineEdit(get_remembered_author())
+        author_row.addWidget(self.author_edit)
+        layout.addLayout(author_row)
+
+        # --- Boutons OK / Annuler ------------------------------------
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok
+            | QtWidgets.QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self.on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        # --- État initial des champs ---------------------------------
+        # Si aucune pièce n'existe, on force le mode "nouvelle pièce".
+        has_existing = len(existing_parts) > 0
+        self.radio_existing.setEnabled(has_existing)
+        if has_existing:
+            self.radio_new.setChecked(True)
+        else:
+            self.radio_new.setChecked(True)
+            self.existing_combo.setEnabled(False)
+
+        # Active/désactive les champs selon le radio sélectionné
+        self.radio_new.toggled.connect(self._update_fields)
+        self._update_fields()
+
+    def _update_fields(self):
+        """Grise les champs non pertinents selon le mode choisi."""
+        is_new = self.radio_new.isChecked()
+        self.new_name_edit.setEnabled(is_new)
+        self.existing_combo.setEnabled(
+            (not is_new) and len(self.existing_parts) > 0
+        )
+
+    def on_accept(self):
+        """Validation : on vérifie les saisies avant de fermer."""
+        author = self.author_edit.text().strip()
+        if not author:
+            QtWidgets.QMessageBox.warning(
+                self, "Champ manquant",
+                "Veuillez indiquer le nom de l'auteur."
+            )
+            return
+        self.result_author = author
+
+        if self.radio_new.isChecked():
+            name = self.new_name_edit.text().strip()
+            if not name:
+                QtWidgets.QMessageBox.warning(
+                    self, "Champ manquant",
+                    "Veuillez indiquer le nom de la nouvelle pièce."
+                )
+                return
+            self.result_part_name = name
+            self.result_part_id = None
+        else:
+            # Pièce existante : on récupère l'id stocké dans l'item
+            self.result_part_id = self.existing_combo.currentData()
+            self.result_part_name = None
+
+        self.accept()
+
+
+# ----------------------------------------------------------------------
+#  EXPORT PRINCIPAL
+# ----------------------------------------------------------------------
 def export_and_send_to_pistock():
     # 1. Vérifier qu'un document est ouvert
     doc = App.activeDocument()
@@ -15,7 +181,7 @@ def export_and_send_to_pistock():
         App.Console.PrintError("❌ Erreur : Aucun document ouvert dans FreeCAD.\n")
         return
 
-    # SÉCURITÉ : Vérifier si le document a bien été enregistré au moins une fois
+    # SÉCURITÉ : le document doit avoir été enregistré au moins une fois
     if not doc.FileName:
         App.Console.PrintError("⚠️  Erreur : Veuillez enregistrer votre fichier (.FCStd) avant de lancer l'export.\n")
         return
@@ -23,14 +189,38 @@ def export_and_send_to_pistock():
     part_name = doc.Name
     App.Console.PrintMessage(f"🚀 Initialisation de l'export PiStock pour : {part_name}\n")
 
-    # 2. Utilisation d'un vrai dossier temporaire système (/tmp/ sous Linux)
-    # Les fichiers temporaires gardent un nom simple : c'est le SERVEUR
-    # qui génère le timestamp et l'ajoute aux noms définitifs lors de
-    # la sauvegarde. Ces fichiers temporaires sont supprimés juste après.
+    # 2. Récupération de la liste des pièces existantes (pour le GUI)
+    existing_parts = fetch_existing_parts()
+
+    # 3. Affichage de la boîte de dialogue PySide6
+    dialog = PiStockExportDialog(part_name, existing_parts,
+                                 Gui.getMainWindow())
+    if dialog.exec() != QtWidgets.QDialog.Accepted:
+        App.Console.PrintMessage("ℹ️  Export annulé par l'utilisateur.\n")
+        return
+
+    chosen_part_id = dialog.result_part_id      # ou None
+    chosen_part_name = dialog.result_part_name  # ou None
+    author = dialog.result_author
+
+    # Mémorise l'auteur : il sera pré-rempli au prochain lancement.
+    remember_author(author)
+
+    if chosen_part_id is not None:
+        App.Console.PrintMessage(
+            f"📌 Export associé à la pièce existante (id={chosen_part_id}).\n"
+        )
+    else:
+        App.Console.PrintMessage(
+            f"📌 Création d'une nouvelle pièce : '{chosen_part_name}'.\n"
+        )
+    App.Console.PrintMessage(f"✍️  Auteur : {author}\n")
+
+    # 4. Génération des fichiers temporaires
     tmp_dir = tempfile.gettempdir()
     fcstd_temp = os.path.join(tmp_dir, f"{part_name}.FCStd")
     png_temp = os.path.join(tmp_dir, f"{part_name}.png")
-    glb_temp = os.path.join(tmp_dir, f"{part_name}.glb")   # glTF binaire (FastAPI friendly)
+    glb_temp = os.path.join(tmp_dir, f"{part_name}.glb")
 
     try:
         # A. Sauvegarde d'une copie propre du fichier natif
@@ -46,13 +236,10 @@ def export_and_send_to_pistock():
             raise Exception("Impossible d'accéder à la vue 3D active.")
 
         # C. Export 3D .glb (glTF binaire)
-        # On ne garde que les objets ayant une forme exportable
         all_objects = [o for o in doc.Objects if hasattr(o, "Shape")]
         if not all_objects:
             raise Exception("Le document ne contient aucun objet exportable.")
 
-        # FreeCAD 1.1 : l'export glTF passe par le module ImportGui.
-        # L'extension .glb produit un unique fichier binaire (idéal pour l'API).
         import ImportGui
         ImportGui.export(all_objects, glb_temp)
 
@@ -65,43 +252,71 @@ def export_and_send_to_pistock():
         App.Console.PrintMessage("📡 Connexion au serveur PiStock et transfert...\n")
 
         boundary = uuid.uuid4().hex
-        parts = []
+        text_parts = []
 
-        # Champ texte part_name
-        parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"part_name\"\r\n\r\n{part_name}\r\n")
+        # Champs texte : on envoie part_id OU part_name (jamais les deux),
+        # plus l'auteur dans tous les cas.
+        def add_text_field(name, value):
+            text_parts.append(
+                f"--{boundary}\r\n"
+                f"Content-Disposition: form-data; name=\"{name}\"\r\n\r\n"
+                f"{value}\r\n"
+            )
+
+        if chosen_part_id is not None:
+            add_text_field("part_id", chosen_part_id)
+        else:
+            add_text_field("part_name", chosen_part_name)
+        add_text_field("author", author)
 
         # Fonction pour packager les fichiers
         def add_file_part(field_name, file_path, content_type):
             filename = os.path.basename(file_path)
-            head = f"--{boundary}\r\nContent-Disposition: form-data; name=\"{field_name}\"; filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n"
+            head = (
+                f"--{boundary}\r\n"
+                f"Content-Disposition: form-data; name=\"{field_name}\"; "
+                f"filename=\"{filename}\"\r\n"
+                f"Content-Type: {content_type}\r\n\r\n"
+            )
             with open(file_path, "rb") as f:
                 body = f.read()
-            return head.encode('utf-8') + body + b"\r\n"
+            return head.encode("utf-8") + body + b"\r\n"
 
-        body_bytes = b"".join([p.encode('utf-8') for p in parts])
+        body_bytes = b"".join([p.encode("utf-8") for p in text_parts])
         body_bytes += add_file_part("cad_file", fcstd_temp, "application/octet-stream")
         body_bytes += add_file_part("thumbnail_file", png_temp, "image/png")
         body_bytes += add_file_part("glb_file", glb_temp, "model/gltf-binary")
-        body_bytes += f"--{boundary}--\r\n".encode('utf-8')
+        body_bytes += f"--{boundary}--\r\n".encode("utf-8")
 
-        req = urllib.request.Request(API_URL, data=body_bytes)
-        req.add_header('Content-Type', f'multipart/form-data; boundary={boundary}')
+        req = urllib.request.Request(API_UPLOAD, data=body_bytes)
+        req.add_header("Content-Type",
+                       f"multipart/form-data; boundary={boundary}")
 
         with urllib.request.urlopen(req) as response:
-            res_data = response.read().decode('utf-8')
-            App.Console.PrintMessage(f"🎉 [SUCCESS] PiStock mis à jour ! Réponse du serveur : {res_data}\n")
+            res_data = response.read().decode("utf-8")
+            App.Console.PrintMessage(
+                f"🎉 [SUCCESS] PiStock mis à jour ! Réponse du serveur : {res_data}\n"
+            )
 
+    except urllib.error.HTTPError as e:
+        # On essaie de lire le détail renvoyé par l'API
+        try:
+            err_body = e.read().decode("utf-8")
+        except Exception:
+            err_body = str(e)
+        App.Console.PrintError(f"❌ Échec de l'opération (HTTP {e.code}) : {err_body}\n")
     except Exception as e:
         App.Console.PrintError(f"❌ Échec de l'opération : {str(e)}\n")
 
     finally:
-        # 4. Nettoyage des fichiers temporaires locaux
+        # 5. Nettoyage des fichiers temporaires locaux
         for f in [fcstd_temp, png_temp, glb_temp]:
             if os.path.exists(f):
                 try:
                     os.remove(f)
-                except:
+                except Exception:
                     pass
+
 
 # Lancement de l'export
 export_and_send_to_pistock()

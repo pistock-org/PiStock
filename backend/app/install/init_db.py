@@ -49,6 +49,9 @@ def setup_pistock_environment():
         timestamp: datetime = Field(
             default_factory=lambda: datetime.now(timezone.utc)
         )
+        # Auteur de cette revision : qui a poussé cet export vers
+        # la base. Renseigne par le GUI de la macro FreeCAD.
+        author: str | None = Field(default=None)
 
     class Stock(SQLModel, table=True):
         __tablename__ = "stock"
