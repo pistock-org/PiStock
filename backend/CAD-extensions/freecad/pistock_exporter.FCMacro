@@ -24,6 +24,9 @@ def export_and_send_to_pistock():
     App.Console.PrintMessage(f"🚀 Initialisation de l'export PiStock pour : {part_name}\n")
 
     # 2. Utilisation d'un vrai dossier temporaire système (/tmp/ sous Linux)
+    # Les fichiers temporaires gardent un nom simple : c'est le SERVEUR
+    # qui génère le timestamp et l'ajoute aux noms définitifs lors de
+    # la sauvegarde. Ces fichiers temporaires sont supprimés juste après.
     tmp_dir = tempfile.gettempdir()
     fcstd_temp = os.path.join(tmp_dir, f"{part_name}.FCStd")
     png_temp = os.path.join(tmp_dir, f"{part_name}.png")
