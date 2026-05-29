@@ -59,6 +59,10 @@ def setup_pistock_environment():
         # Incremente automatiquement a chaque nouvelle revision PLM
         # POUR UNE PIECE DONNEE. Premier push d'une piece = 'aa'.
         version: str = Field(default="aa", max_length=2)
+        # Flag "revision principale" : si une revision est marquee
+        # is_main=True, c'est elle qui s'affiche partout (au lieu de
+        # la plus recente par timestamp, qui reste le fallback).
+        is_main: bool = Field(default=False)
 
     class Stock(SQLModel, table=True):
         __tablename__ = "stock"

@@ -54,6 +54,9 @@ class PLM(SQLModel, table=True):
     # Numero de version (aa..zz), incremente par piece a chaque
     # nouvelle revision. Geree automatiquement cote serveur.
     version: str = Field(default="aa", max_length=2)
+    # Flag "revision principale" : si True, c'est cette revision qui
+    # est affichee. Sinon, fallback sur la plus recente par timestamp.
+    is_main: bool = Field(default=False)
 
 
 class Stock(SQLModel, table=True):
@@ -159,6 +162,27 @@ def _next_version_for_part(session: Session, part_id: int) -> str:
     return _int_to_version(next_n)
 
 
+def _get_current_plm(session: Session, part_id: int):
+    """Renvoie la revision PLM "courante" d'une piece :
+    - celle marquee is_main=True si elle existe
+    - sinon, la plus recente par timestamp
+    - None si la piece n'a aucune revision PLM
+    Centralise la logique de "quelle revision afficher" pour rester
+    coherent entre /parts/full, /parts/{id} et le dashboard."""
+    main = session.exec(
+        select(PLM)
+        .where(PLM.id_parts == part_id)
+        .where(PLM.is_main == True)  # noqa: E712 (SQLAlchemy needs ==)
+    ).first()
+    if main is not None:
+        return main
+    return session.exec(
+        select(PLM)
+        .where(PLM.id_parts == part_id)
+        .order_by(PLM.timestamp.desc())
+    ).first()
+
+
 @app.on_event("startup")
 def on_startup():
     SQLModel.metadata.create_all(engine)
@@ -256,12 +280,9 @@ def list_parts_full(project_code: str | None = None):
 
         result = []
         for p in parts:
-            # Derniere revision PLM (timestamp le plus recent)
-            latest_plm = session.exec(
-                select(PLM)
-                .where(PLM.id_parts == p.id)
-                .order_by(PLM.timestamp.desc())
-            ).first()
+            # "Revision courante" : is_main si marquee, sinon la
+            # plus recente par timestamp (cf. _get_current_plm).
+            latest_plm = _get_current_plm(session, p.id)
 
             stock_row = session.exec(
                 select(Stock).where(Stock.id_parts == p.id)
@@ -312,11 +333,7 @@ def get_part(part_id: int):
         p = session.get(Parts, part_id)
         if p is None:
             raise HTTPException(status_code=404, detail="Pièce introuvable.")
-        latest_plm = session.exec(
-            select(PLM)
-            .where(PLM.id_parts == p.id)
-            .order_by(PLM.timestamp.desc())
-        ).first()
+        latest_plm = _get_current_plm(session, p.id)
         return {
             "id": p.id,
             "part_name": p.part_name,
@@ -655,6 +672,116 @@ async def upload_stock_photo(part_id: int, photo: UploadFile = File(...)):
             "part_id": part_id,
             "stock_img_url": f"/{rel_path}",
         }
+
+
+# ----------------------------------------------------------------------
+#  ENDPOINTS REVISIONS PLM (liste, suppression, set-main)
+# ----------------------------------------------------------------------
+@app.get("/api/v1/parts/{part_id}/revisions")
+def list_part_revisions(part_id: int):
+    """Liste toutes les revisions PLM d'une piece, de la plus recente
+    a la plus ancienne. Marque celle qui est "courante" (is_main si
+    elle existe, sinon la plus recente)."""
+    with Session(engine) as session:
+        part = session.get(Parts, part_id)
+        if part is None:
+            raise HTTPException(status_code=404,
+                                detail=f"Pièce id={part_id} introuvable.")
+        revisions = session.exec(
+            select(PLM)
+            .where(PLM.id_parts == part_id)
+            .order_by(PLM.timestamp.desc())
+        ).all()
+        current = _get_current_plm(session, part_id)
+        current_id = current.id if current else None
+        return [
+            {
+                "id": r.id,
+                "version": r.version,
+                "timestamp": r.timestamp.isoformat(),
+                "author": r.author,
+                "is_main": r.is_main,
+                "is_current": (r.id == current_id),
+                "glb_url": (f"/{r.path_2_3dglb}"
+                             if r.path_2_3dglb else None),
+                "thumbnail_url": (f"/{r.path_2_thumbnail}"
+                                   if r.path_2_thumbnail else None),
+            }
+            for r in revisions
+        ]
+
+
+def _delete_file_if_exists(rel_path: str | None):
+    """Supprime un fichier sur disque a partir d'un chemin relatif
+    a DATA_DIR. Silencieux si le fichier n'existe pas ou en cas
+    d'erreur d'I/O (on prefere ne pas planter pour ca)."""
+    if not rel_path:
+        return
+    abs_path = os.path.join(DATA_DIR, rel_path)
+    try:
+        if os.path.isfile(abs_path):
+            os.remove(abs_path)
+            logger.info(f"Fichier supprime : {abs_path}")
+    except OSError as e:
+        logger.warning(f"Impossible de supprimer {abs_path} : {e}")
+
+
+@app.delete("/api/v1/plm/{plm_id}")
+def delete_plm_revision(plm_id: int):
+    """Supprime une revision PLM : la ligne en base ET les fichiers
+    associes sur disque (.FCStd, .glb, .png). Refuse si la piece
+    est verrouillee."""
+    with Session(engine) as session:
+        plm = session.get(PLM, plm_id)
+        if plm is None:
+            raise HTTPException(status_code=404,
+                                detail=f"Révision PLM id={plm_id} introuvable.")
+        part = session.get(Parts, plm.id_parts)
+        if part is not None:
+            _check_not_locked(part)
+
+        # Supprimer les fichiers AVANT de detruire la ligne, pour
+        # avoir les chemins disponibles.
+        _delete_file_if_exists(plm.path_2_cadfile)
+        _delete_file_if_exists(plm.path_2_thumbnail)
+        _delete_file_if_exists(plm.path_2_3dglb)
+
+        session.delete(plm)
+        session.commit()
+        logger.info(f"Révision PLM {plm_id} supprimée (piece {part.part_name if part else '?'}).")
+        return {"status": "success", "deleted_id": plm_id}
+
+
+@app.post("/api/v1/plm/{plm_id}/set-main")
+def set_plm_main(plm_id: int):
+    """Marque cette revision comme "principale" (is_main=True) et
+    deflaggent toutes les autres revisions de la meme piece. Refuse
+    si la piece est verrouillee."""
+    with Session(engine) as session:
+        plm = session.get(PLM, plm_id)
+        if plm is None:
+            raise HTTPException(status_code=404,
+                                detail=f"Révision PLM id={plm_id} introuvable.")
+        part = session.get(Parts, plm.id_parts)
+        if part is not None:
+            _check_not_locked(part)
+
+        # Reset is_main sur toutes les autres revisions de cette piece,
+        # puis flagger celle-ci. Tout dans la meme transaction.
+        others = session.exec(
+            select(PLM)
+            .where(PLM.id_parts == plm.id_parts)
+            .where(PLM.id != plm_id)
+            .where(PLM.is_main == True)  # noqa: E712
+        ).all()
+        for o in others:
+            o.is_main = False
+            session.add(o)
+        plm.is_main = True
+        session.add(plm)
+        session.commit()
+        logger.info(f"Révision PLM {plm_id} (v{plm.version}) marquee principale.")
+        return {"status": "success", "id": plm_id, "is_main": True}
 
 
 @app.post("/api/v1/parts/upload")

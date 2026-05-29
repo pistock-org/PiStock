@@ -10,6 +10,7 @@ Pages :
   /part/{id} -> viewer 3D pour une pièce donnée
 """
 import os
+import json
 import shutil
 from datetime import datetime, timezone
 from nicegui import ui, events
@@ -62,10 +63,11 @@ def fetch_parts_full(project_code: str | None = None):
 
         result = []
         for p in parts:
-            latest_plm = session.exec(
-                select(PLM).where(PLM.id_parts == p.id)
-                .order_by(PLM.timestamp.desc())
-            ).first()
+            # IMPORTANT : on utilise le helper main._get_current_plm
+            # pour rester coherent avec le reste du backend. Sinon
+            # le dashboard afficherait la plus recente meme quand
+            # l'utilisateur a marque une autre revision comme "principale".
+            latest_plm = main._get_current_plm(session, p.id)
             stock_row = session.exec(
                 select(Stock).where(Stock.id_parts == p.id)
             ).first()
@@ -207,16 +209,17 @@ def save_stock(part_id: int, quantity: int,
 
 
 def fetch_part_detail(part_id: int):
-    """Detail d'une piece pour la page viewer 3D."""
+    """Detail d'une piece pour la page viewer 3D. Renvoie la revision
+    "courante" (is_main si marquee, sinon la plus recente)."""
     engine, Parts, PLM, _, _ = _db()
+    import main
     with Session(engine) as session:
         p = session.get(Parts, part_id)
         if p is None:
             return None
-        latest_plm = session.exec(
-            select(PLM).where(PLM.id_parts == p.id)
-            .order_by(PLM.timestamp.desc())
-        ).first()
+        # Utilise le helper centralise dans main pour rester coherent
+        # avec le reste du backend.
+        latest_plm = main._get_current_plm(session, p.id)
         return {
             "id": p.id,
             "part_name": p.part_name,
@@ -227,6 +230,95 @@ def fetch_part_detail(part_id: int):
             "last_timestamp": (latest_plm.timestamp.isoformat()
                                 if latest_plm else None),
         }
+
+
+def fetch_revisions(part_id: int):
+    """Liste toutes les revisions PLM d'une piece, plus recente en
+    premier. Chaque entree a 'is_current' = True pour celle qui est
+    affichee par defaut (is_main ou plus recente par timestamp)."""
+    engine, _, PLM, _, _ = _db()
+    import main
+    with Session(engine) as session:
+        revisions = session.exec(
+            select(PLM).where(PLM.id_parts == part_id)
+            .order_by(PLM.timestamp.desc())
+        ).all()
+        current = main._get_current_plm(session, part_id)
+        current_id = current.id if current else None
+        return [
+            {
+                "id": r.id,
+                "version": r.version,
+                "timestamp": r.timestamp.isoformat(),
+                "author": r.author,
+                "is_main": r.is_main,
+                "is_current": (r.id == current_id),
+                "glb_url": (f"/{r.path_2_3dglb}" if r.path_2_3dglb else None),
+                "thumbnail_url": (f"/{r.path_2_thumbnail}"
+                                   if r.path_2_thumbnail else None),
+            }
+            for r in revisions
+        ]
+
+
+def delete_revision_db(plm_id: int):
+    """Supprime une revision (ligne + fichiers disque). Verifie le
+    verrou de la piece parente. Retourne (ok, msg)."""
+    engine, Parts_cls, PLM_cls, _, DATA_DIR = _db()
+    with Session(engine) as session:
+        plm = session.get(PLM_cls, plm_id)
+        if plm is None:
+            return (False, "Révision introuvable.")
+        part = session.get(Parts_cls, plm.id_parts)
+        if part is not None and part.locked:
+            return (False,
+                    f"Pièce '{part.part_name}' verrouillée — "
+                    f"déverrouillez avant de supprimer.")
+
+        # Suppression des fichiers (best-effort, ignore les erreurs)
+        for rel_path in (plm.path_2_cadfile, plm.path_2_thumbnail,
+                          plm.path_2_3dglb):
+            if not rel_path:
+                continue
+            abs_path = os.path.join(DATA_DIR, rel_path)
+            try:
+                if os.path.isfile(abs_path):
+                    os.remove(abs_path)
+            except OSError:
+                pass
+
+        session.delete(plm)
+        session.commit()
+        return (True, f"Révision '{plm.version}' supprimée.")
+
+
+def set_revision_main_db(plm_id: int):
+    """Marque cette revision principale (et demarque les autres).
+    Verifie le verrou. Retourne (ok, msg)."""
+    engine, Parts_cls, PLM_cls, _, _ = _db()
+    with Session(engine) as session:
+        plm = session.get(PLM_cls, plm_id)
+        if plm is None:
+            return (False, "Révision introuvable.")
+        part = session.get(Parts_cls, plm.id_parts)
+        if part is not None and part.locked:
+            return (False,
+                    f"Pièce '{part.part_name}' verrouillée — "
+                    f"déverrouillez avant de modifier.")
+        # Demarque toutes les autres de la meme piece
+        others = session.exec(
+            select(PLM_cls)
+            .where(PLM_cls.id_parts == plm.id_parts)
+            .where(PLM_cls.id != plm_id)
+            .where(PLM_cls.is_main == True)  # noqa: E712
+        ).all()
+        for o in others:
+            o.is_main = False
+            session.add(o)
+        plm.is_main = True
+        session.add(plm)
+        session.commit()
+        return (True, f"Version '{plm.version}' définie comme principale.")
 
 
 def create_part_in_db(part_name: str):
@@ -782,8 +874,19 @@ def render_stock_photo_cell(part: dict, on_change):
 # ======================================================================
 @ui.page("/part/{part_id}")
 def part_page(part_id: int):
-    """Page viewer 3D pour une piece donnee."""
+    """Page viewer 3D pour une piece donnee, avec liste des
+    revisions PLM sous le viewer."""
     part = fetch_part_detail(part_id)
+
+    # Charger model-viewer (web component de Google) dans le <head>.
+    # Bien meilleur que ui.scene pour les .glb FreeCAD : auto-fit
+    # camera, eclairage PBR, gestion des double-faces, OrbitControls
+    # propres. Le 'type=module' est requis (model-viewer est une lib ES).
+    ui.add_head_html('''
+        <script type="module"
+                src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js">
+        </script>
+    ''')
 
     with ui.header().classes("bg-stone-800 text-white shadow"):
         ui.label("📦 PiStock — Vue 3D").classes("text-xl font-medium")
@@ -810,29 +913,181 @@ def part_page(part_id: int):
                 .classes("text-gray-500 p-4 bg-white rounded-lg shadow")
             return
 
-        # --- Scene 3D ---------------------------------------------
-        # ui.scene() integre Three.js. Le .glb est charge via URL HTTP
-        # (notre mount /uploads/ le sert).
-        # On encadre dans une carte pour rester cohérent visuellement.
+        # --- Viewer 3D (model-viewer) ---------------------------------
+        # On utilise ui.element() plutot que ui.html() : NiceGUI 3.x
+        # sanitise ui.html() et Vue.js filtre les custom elements
+        # qu'il ne connait pas — du coup <model-viewer> dans un
+        # ui.html() etait silencieusement supprime. Avec ui.element,
+        # NiceGUI sait qu'on veut un noeud brut avec ce nom de tag.
         with ui.card().classes("w-full p-0 overflow-hidden"):
-            with ui.scene(width=1100, height=600,
-                           background_color="#f5f5f7") as scene:
-                # Charge le glTF. Les .glb de FreeCAD sont souvent en
-                # millimetres avec Y-up ou Z-up selon l'export ; on
-                # garde l'orientation par defaut. Si la piece apparait
-                # trop grande/petite, ajuster .scale() ici.
-                scene.gltf(part["glb_url"])
-                # Place la camera un peu en arriere pour voir l'objet.
-                # L'utilisateur peut ensuite zoomer/orbiter a la souris.
-                scene.move_camera(x=2, y=2, z=2,
-                                   look_at_x=0, look_at_y=0, look_at_z=0)
+            # Construction des attributs. Les attributs booleens
+            # (camera-controls, auto-rotate) sont passes sans valeur,
+            # les attributs avec valeur sont en src="...".
+            viewer = ui.element("model-viewer")
+            viewer.props(
+                f'src="{part["glb_url"]}" '
+                f'alt="Modèle 3D de {part["part_name"]}" '
+                f'camera-controls '
+                f'touch-action="pan-y" '
+                f'shadow-intensity="1" '
+                f'exposure="1" '
+                f'auto-rotate '
+                f'auto-rotate-delay="3000"'
+            )
+            # Dimensionnement direct (le CSS global a aussi un fallback)
+            viewer.style("width: 100%; height: 600px; display: block; "
+                         "background: linear-gradient(135deg, "
+                         "#f5f5f7 0%, #e8e8eb 100%);")
 
-        # Bloc d'infos sous le viewer
+        # --- Bloc info revision affichee ------------------------------
+        info_card = ui.card().classes("w-full p-3")
+        with info_card:
+            info_label = ui.label() \
+                .classes("text-sm text-gray-600")
+        # Mise a jour initiale
         author = part.get("last_author") or "—"
         ts = part.get("last_timestamp") or "—"
-        with ui.card().classes("w-full"):
-            ui.label(f"Dernière révision par {author} le {ts}") \
-                .classes("text-sm text-gray-600")
+        info_label.text = f"Révision affichée — par {author} le {ts}"
+
+        # --- Liste des revisions PLM ----------------------------------
+        ui.label("Historique des révisions").classes("text-base font-medium mt-2")
+        revisions_container = ui.column().classes("w-full gap-2")
+
+        def change_displayed_revision(glb_url: str, author: str, ts: str,
+                                       version: str):
+            """Change le modele affiche dans le viewer + met a jour
+            l'info en dessous. On utilise viewer.props() qui synchronise
+            l'attribut côté client via NiceGUI, plus propre qu'un
+            ui.run_javascript() direct."""
+            # On reapplique tous les attributs avec le nouveau src.
+            # Note : NiceGUI replace les props existantes a chaque appel.
+            viewer.props(
+                f'src="{glb_url}" '
+                f'alt="Modèle 3D de {part["part_name"]} (rev {version})" '
+                f'camera-controls '
+                f'touch-action="pan-y" '
+                f'shadow-intensity="1" '
+                f'exposure="1" '
+                f'auto-rotate '
+                f'auto-rotate-delay="3000"'
+            )
+            info_label.text = (f"Révision {version} — par {author} le {ts}")
+
+        def refresh_revisions():
+            """Recharge la liste des revisions depuis la base."""
+            revisions_container.clear()
+            revisions = fetch_revisions(part_id)
+            if not revisions:
+                with revisions_container:
+                    ui.label("Aucune révision pour le moment.") \
+                        .classes("text-gray-500 text-sm p-2")
+                return
+            for r in revisions:
+                with revisions_container:
+                    render_revision_row(r, refresh_revisions,
+                                         change_displayed_revision)
+
+        refresh_revisions()
+
+# --- Rendu d'une ligne de revision (helper) ---------------------------
+def render_revision_row(rev: dict, on_change, on_view):
+    """Une ligne dans la liste des revisions.
+    'on_change' : appele apres set-main / delete pour rafraichir.
+    'on_view'(glb_url, author, ts, version) : appele au clic ligne."""
+    is_current = rev["is_current"]
+    is_main_flag = rev["is_main"]
+
+    # Bordure speciale pour mettre en evidence celle affichee
+    extra = " border-2 border-blue-500" if is_current else ""
+
+    with ui.card().classes(f"w-full p-3 cursor-pointer hover:bg-blue-50 "
+                            f"transition" + extra) as card:
+        with ui.row().classes("items-center gap-3 no-wrap w-full"):
+            # Pastille version
+            ui.label(rev["version"]) \
+                .classes("text-sm font-mono font-bold "
+                          "text-blue-700 bg-blue-50 "
+                          "px-2 py-1 rounded flex-shrink-0")
+
+            # Vignette
+            if rev["thumbnail_url"]:
+                ui.image(rev["thumbnail_url"]) \
+                    .classes("w-12 h-12 object-contain bg-stone-50 "
+                              "rounded flex-shrink-0")
+
+            # Infos
+            with ui.column().classes("gap-0 flex-grow"):
+                # Author + ts
+                ui.label(f"{rev['author'] or '—'}") \
+                    .classes("text-sm font-medium")
+                ui.label(rev["timestamp"][:19].replace("T", " ")) \
+                    .classes("text-xs text-gray-500")
+
+            # Badges "principale" / "courante"
+            if is_main_flag:
+                ui.label("★ principale") \
+                    .classes("text-xs text-amber-700 bg-amber-100 "
+                              "px-2 py-0.5 rounded font-medium")
+            elif is_current:
+                ui.label("affichée") \
+                    .classes("text-xs text-blue-700 bg-blue-100 "
+                              "px-2 py-0.5 rounded")
+
+            # Bouton "définir principale"
+            # Pas affiche si c'est deja la principale (rien a faire)
+            def make_set_main(plm_id=rev["id"]):
+                def handler():
+                    ok, msg = set_revision_main_db(plm_id)
+                    ui.notify(msg, type="positive" if ok else "negative")
+                    if ok:
+                        on_change()
+                return handler
+
+            star_btn = ui.button(icon="star", on_click=make_set_main()) \
+                .props("flat round dense color=amber") \
+                .tooltip("Définir comme principale")
+            star_btn.classes("flex-shrink-0")
+            if is_main_flag:
+                star_btn.set_visibility(False)
+
+            # Bouton suppression (avec confirmation)
+            def make_delete(plm_id=rev["id"], version=rev["version"]):
+                def handler():
+                    confirm_delete_revision(plm_id, version, on_change)
+                return handler
+            ui.button(icon="delete", on_click=make_delete()) \
+                .props("flat round dense color=negative") \
+                .classes("flex-shrink-0") \
+                .tooltip("Supprimer cette révision")
+
+    # Clic sur le corps de la carte (en evitant les boutons) =
+    # afficher cette revision dans le viewer.
+    def on_card_click(_, r=rev):
+        if r["glb_url"]:
+            on_view(r["glb_url"], r["author"] or "—",
+                     r["timestamp"], r["version"])
+    card.on("click", on_card_click)
+
+
+def confirm_delete_revision(plm_id: int, version: str, on_change):
+    """Petit dialogue de confirmation avant suppression destructive."""
+    with ui.dialog() as dialog, ui.card():
+        ui.label(f"Supprimer la révision « {version} » ?") \
+            .classes("text-base font-medium")
+        ui.label("Cette action est irréversible : les fichiers .FCStd, "
+                  ".glb et .png seront effacés du disque.") \
+            .classes("text-sm text-gray-600 max-w-[400px]")
+        with ui.row().classes("w-full justify-end gap-2 mt-2"):
+            ui.button("Annuler", on_click=dialog.close).props("flat")
+            def confirm():
+                ok, msg = delete_revision_db(plm_id)
+                ui.notify(msg, type="positive" if ok else "negative")
+                dialog.close()
+                if ok:
+                    on_change()
+            ui.button("Supprimer", on_click=confirm) \
+                .props("color=negative")
+    dialog.open()
 
 
 # ======================================================================
