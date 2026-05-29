@@ -34,6 +34,10 @@ class Parts(SQLModel, table=True):
     __tablename__ = "parts"
     id: int | None = Field(default=None, primary_key=True)
     part_name: str = Field(index=True, unique=True)
+    # Lien optionnel vers un projet. Voir init_db.py pour le detail.
+    id_project: int | None = Field(default=None, foreign_key="project.id")
+    status: str = Field(default="Init")
+    locked: bool = Field(default=False)
 
 
 class PLM(SQLModel, table=True):
@@ -47,6 +51,9 @@ class PLM(SQLModel, table=True):
         default_factory=lambda: datetime.now(timezone.utc)
     )
     author: str | None = None
+    # Numero de version (aa..zz), incremente par piece a chaque
+    # nouvelle revision. Geree automatiquement cote serveur.
+    version: str = Field(default="aa", max_length=2)
 
 
 class Stock(SQLModel, table=True):
@@ -114,6 +121,42 @@ def _next_project_code(session: Session) -> str:
     return _int_to_code(next_n)
 
 
+# ----------------------------------------------------------------------
+#  HELPER GENERATION VERSION PLM
+# ----------------------------------------------------------------------
+# Meme logique que les codes projet, mais sur 2 lettres minuscules
+# (aa..zz, soit 676 versions max par piece). Calcule PAR PIECE.
+PLM_VERSION_MAX = 26 * 26 - 1  # = 675 -> "zz"
+
+
+def _version_to_int(v: str) -> int:
+    return (ord(v[0]) - ord("a")) * 26 + (ord(v[1]) - ord("a"))
+
+
+def _int_to_version(n: int) -> str:
+    return chr(ord("a") + n // 26) + chr(ord("a") + n % 26)
+
+
+def _next_version_for_part(session: Session, part_id: int) -> str:
+    """Renvoie la prochaine version PLM pour une piece donnee.
+    Premiere revision -> 'aa'. Sinon : (max existant pour cette piece) + 1."""
+    last = session.exec(
+        select(PLM.version)
+        .where(PLM.id_parts == part_id)
+        .order_by(PLM.version.desc())
+        .limit(1)
+    ).first()
+    if last is None:
+        return "aa"
+    next_n = _version_to_int(last) + 1
+    if next_n > PLM_VERSION_MAX:
+        raise HTTPException(
+            status_code=507,
+            detail=f"Limite de versions PLM atteinte (zz) pour cette piece."
+        )
+    return _int_to_version(next_n)
+
+
 @app.on_event("startup")
 def on_startup():
     SQLModel.metadata.create_all(engine)
@@ -169,12 +212,30 @@ def list_parts():
 
 
 @app.get("/api/v1/parts/full")
-def list_parts_full():
-    """Liste enrichie pour le dashboard frontend :
-    pour chaque pièce, on renvoie la DERNIERE revision PLM (la plus
-    récente par timestamp) et les infos de stock si disponibles."""
+def list_parts_full(project_code: str | None = None):
+    """Liste enrichie pour le dashboard frontend.
+    Pour chaque piece : derniere revision PLM, infos de stock,
+    projet associe, statut, verrou. Filtre optionnel par 'project_code'."""
     with Session(engine) as session:
-        parts = session.exec(select(Parts).order_by(Parts.part_name)).all()
+        # Construction de la requete avec filtre optionnel
+        query = select(Parts).order_by(Parts.part_name)
+        if project_code:
+            # Resoudre le code projet en id pour le where
+            project = session.exec(
+                select(Project).where(Project.code == project_code)
+            ).first()
+            if project is None:
+                return []  # code projet inexistant -> liste vide
+            query = query.where(Parts.id_project == project.id)
+        parts = session.exec(query).all()
+
+        # Pre-charger TOUS les projets dans un dict {id: code}
+        # pour eviter une requete par piece.
+        projects_by_id = {
+            p.id: p.code
+            for p in session.exec(select(Project)).all()
+        }
+
         result = []
         for p in parts:
             # Derniere revision PLM (timestamp le plus recent)
@@ -184,8 +245,6 @@ def list_parts_full():
                 .order_by(PLM.timestamp.desc())
             ).first()
 
-            # Premiere ligne de stock liee a cette piece (s'il y en a une).
-            # On reste simple : une piece = une ligne de stock attendue.
             stock_row = session.exec(
                 select(Stock).where(Stock.id_parts == p.id)
             ).first()
@@ -193,7 +252,13 @@ def list_parts_full():
             result.append({
                 "id": p.id,
                 "part_name": p.part_name,
-                # URLs relatives a la racine du serveur (servies par /uploads/)
+                # Champs ajoutes
+                "id_project": p.id_project,
+                "project_code": projects_by_id.get(p.id_project),
+                "status": p.status,
+                "locked": p.locked,
+                "version": latest_plm.version if latest_plm else None,
+                # Champs existants
                 "thumbnail_url": (
                     f"/{latest_plm.path_2_thumbnail}"
                     if latest_plm and latest_plm.path_2_thumbnail else None
@@ -207,7 +272,6 @@ def list_parts_full():
                     latest_plm.timestamp.isoformat()
                     if latest_plm else None
                 ),
-                # Infos de stock (None si la piece n'a pas encore de stock)
                 "stock_img_url": (
                     f"/{stock_row.path_2_img}"
                     if stock_row and stock_row.path_2_img else None
@@ -281,6 +345,107 @@ def create_part_manual(part_name: str = Form(...)):
             "id": part.id,
             "part_name": part.part_name,
         }
+
+
+# ----------------------------------------------------------------------
+#  ACTIONS PAR PIECE : projet / status / verrou
+# ----------------------------------------------------------------------
+# Toutes ces actions verifient le verrou (sauf le toggle du verrou
+# lui-meme, evidemment). Si la piece est verrouillee, on renvoie 423.
+
+VALID_STATUSES = {"Init", "Revue", "Asset"}
+
+
+def _check_not_locked(part: Parts):
+    if part.locked:
+        raise HTTPException(
+            status_code=423,  # 423 Locked
+            detail=f"La pièce '{part.part_name}' est verrouillée. "
+                   f"Déverrouillez-la avant de la modifier.",
+        )
+
+
+@app.post("/api/v1/parts/{part_id}/assign-project")
+def assign_project(part_id: int,
+                    project_id: int | None = Form(default=None)):
+    """Associe (ou dissocie si project_id est null/absent) une piece
+    a un projet. Refuse si la piece est verrouillee."""
+    with Session(engine) as session:
+        part = session.get(Parts, part_id)
+        if part is None:
+            raise HTTPException(status_code=404, detail="Pièce introuvable.")
+        _check_not_locked(part)
+
+        if project_id is not None:
+            project = session.get(Project, project_id)
+            if project is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Projet id={project_id} introuvable."
+                )
+
+        part.id_project = project_id
+        session.add(part)
+        session.commit()
+        return {"status": "success", "id_project": part.id_project}
+
+
+@app.post("/api/v1/parts/{part_id}/status")
+def set_part_status(part_id: int, new_status: str = Form(...)):
+    """Change le statut d'une piece (Init / Revue / Asset).
+    Refuse si la piece est verrouillee."""
+    if new_status not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Statut invalide. Valeurs autorisees : "
+                   f"{', '.join(sorted(VALID_STATUSES))}"
+        )
+    with Session(engine) as session:
+        part = session.get(Parts, part_id)
+        if part is None:
+            raise HTTPException(status_code=404, detail="Pièce introuvable.")
+        _check_not_locked(part)
+        part.status = new_status
+        session.add(part)
+        session.commit()
+        return {"status": "success", "new_status": part.status}
+
+
+@app.post("/api/v1/parts/{part_id}/lock")
+def toggle_part_lock(part_id: int, locked: bool = Form(...)):
+    """Toggle le verrou d'une piece. Pas de protection vs lui-meme :
+    le verrou peut toujours etre modifie (sinon il serait impossible
+    de le retirer une fois pose)."""
+    with Session(engine) as session:
+        part = session.get(Parts, part_id)
+        if part is None:
+            raise HTTPException(status_code=404, detail="Pièce introuvable.")
+        part.locked = bool(locked)
+        session.add(part)
+        session.commit()
+        return {"status": "success", "locked": part.locked}
+
+
+@app.get("/api/v1/last-used-project")
+def get_last_used_project():
+    """Renvoie le projet de la PIECE creee le plus recemment qui a
+    un projet associe. Utilise par l'UI pour pre-selectionner un
+    projet quand on en assigne un a une nouvelle piece. None si
+    aucune piece n'a encore de projet."""
+    with Session(engine) as session:
+        # 'id DESC' = ordre de creation inverse (id auto-incremente)
+        part = session.exec(
+            select(Parts)
+            .where(Parts.id_project.is_not(None))
+            .order_by(Parts.id.desc())
+            .limit(1)
+        ).first()
+        if part is None:
+            return {"id": None, "code": None}
+        project = session.get(Project, part.id_project)
+        if project is None:
+            return {"id": None, "code": None}
+        return {"id": project.id, "code": project.code}
 
 
 @app.post("/api/v1/parts/{part_id}/stock-photo")
@@ -399,6 +564,11 @@ async def upload_new_part(
                     logger.info(f"Nouvelle pièce '{part_name}' "
                                 f"créée (id={part.id}).")
 
+            # Calcul de la prochaine version PLM pour cette piece.
+            # Doit etre fait APRES le flush (pour que part.id existe)
+            # mais AVANT la creation de la ligne PLM.
+            new_version = _next_version_for_part(session, part.id)
+
             new_plm = PLM(
                 id_parts=part.id,
                 path_2_cadfile=saved_paths["cad"],
@@ -406,6 +576,7 @@ async def upload_new_part(
                 path_2_3dglb=saved_paths["glb"],
                 timestamp=ts_dt,
                 author=author,
+                version=new_version,
             )
             session.add(new_plm)
             session.commit()
@@ -413,12 +584,14 @@ async def upload_new_part(
             part_id_final = part.id
             part_name_final = part.part_name
             plm_id = new_plm.id
+            plm_version = new_plm.version
 
         return {
             "status": "success",
             "part_id": part_id_final,
             "part_name": part_name_final,
             "plm_id": plm_id,
+            "plm_version": plm_version,
             "part_created": part_created,
             "author": author,
             "timestamp": ts_dt.isoformat(),

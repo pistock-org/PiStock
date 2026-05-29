@@ -31,28 +31,34 @@ def setup_pistock_environment():
     class Parts(SQLModel, table=True):
         __tablename__ = "parts"
         id: int | None = Field(default=None, primary_key=True)
-        # Nom de la piece. 'unique=True' garantit qu'on ne peut pas
-        # enregistrer deux fois la meme piece -> indispensable pour
-        # pouvoir verifier "ce nom existe-t-il deja ?" cote serveur.
         part_name: str = Field(index=True, unique=True)
+        # Lien optionnel vers un projet. Nullable car une piece peut
+        # exister sans projet (legacy ou pieces standalone).
+        id_project: int | None = Field(default=None,
+                                        foreign_key="project.id")
+        # Statut de maturite de la piece : 'Init' (en cours), 'Revue'
+        # (en relecture), 'Asset' (validee, prete pour usage prod).
+        status: str = Field(default="Init")
+        # Verrou : quand True, l'UI empeche les modifications (projet,
+        # statut). N'empeche PAS les uploads de nouvelles revisions
+        # via la macro FreeCAD (sinon trop restrictif pour un PLM).
+        locked: bool = Field(default=False)
 
     class PLM(SQLModel, table=True):
         __tablename__ = "plm"
         id: int | None = Field(default=None, primary_key=True)
-        # Link directly to the primary key of the parts table
         id_parts: int = Field(foreign_key="parts.id", nullable=False)
         path_2_cadfile: str | None = Field(default=None)
         path_2_thumbnail: str | None = Field(default=None)
         path_2_3dglb: str | None = Field(default=None)
-        # Horodatage de l'enregistrement. Chaque export cree une
-        # nouvelle ligne PLM avec un timestamp different : c'est ce
-        # qui permet de tracer les revisions successives d'une piece.
         timestamp: datetime = Field(
             default_factory=lambda: datetime.now(timezone.utc)
         )
-        # Auteur de cette revision : qui a poussé cet export vers
-        # la base. Renseigne par le GUI de la macro FreeCAD.
         author: str | None = Field(default=None)
+        # Numero de version : deux lettres minuscules, aa->zz (676 max).
+        # Incremente automatiquement a chaque nouvelle revision PLM
+        # POUR UNE PIECE DONNEE. Premier push d'une piece = 'aa'.
+        version: str = Field(default="aa", max_length=2)
 
     class Stock(SQLModel, table=True):
         __tablename__ = "stock"

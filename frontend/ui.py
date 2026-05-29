@@ -37,12 +37,29 @@ def _db_project():
 # ======================================================================
 #  ACCES BASE DE DONNEES
 # ======================================================================
-def fetch_parts_full():
-    """Liste enrichie : pour chaque piece, derniere revision PLM
-    + ligne de stock si elle existe."""
+def fetch_parts_full(project_code: str | None = None):
+    """Liste enrichie : pour chaque piece, derniere revision PLM,
+    infos de stock, projet associe, statut, verrou. Filtre optionnel."""
     engine, Parts, PLM, Stock, _ = _db()
+    import main
+    Project_cls = main.Project
     with Session(engine) as session:
-        parts = session.exec(select(Parts).order_by(Parts.part_name)).all()
+        query = select(Parts).order_by(Parts.part_name)
+        if project_code:
+            project = session.exec(
+                select(Project_cls).where(Project_cls.code == project_code)
+            ).first()
+            if project is None:
+                return []
+            query = query.where(Parts.id_project == project.id)
+        parts = session.exec(query).all()
+
+        # Pre-charge des codes projets pour eviter une requete par piece
+        projects_by_id = {
+            p.id: p.code
+            for p in session.exec(select(Project_cls)).all()
+        }
+
         result = []
         for p in parts:
             latest_plm = session.exec(
@@ -55,6 +72,11 @@ def fetch_parts_full():
             result.append({
                 "id": p.id,
                 "part_name": p.part_name,
+                "id_project": p.id_project,
+                "project_code": projects_by_id.get(p.id_project),
+                "status": p.status,
+                "locked": p.locked,
+                "version": latest_plm.version if latest_plm else None,
                 "thumbnail_url": (f"/{latest_plm.path_2_thumbnail}"
                                    if latest_plm and latest_plm.path_2_thumbnail
                                    else None),
@@ -68,6 +90,71 @@ def fetch_parts_full():
                 "location": stock_row.location if stock_row else None,
             })
         return result
+
+
+def fetch_last_used_project_id():
+    """Renvoie l'id du dernier projet utilise (par une piece), ou None."""
+    engine, Parts_cls, _, _, _ = _db()
+    with Session(engine) as session:
+        part = session.exec(
+            select(Parts_cls)
+            .where(Parts_cls.id_project.is_not(None))
+            .order_by(Parts_cls.id.desc())
+            .limit(1)
+        ).first()
+        return part.id_project if part else None
+
+
+def assign_project_to_part(part_id: int, project_id: int | None):
+    """Assigne (ou dissocie si None) un projet. Retourne (ok, msg)."""
+    engine, Parts_cls, _, _, _ = _db()
+    import main
+    Project_cls = main.Project
+    with Session(engine) as session:
+        part = session.get(Parts_cls, part_id)
+        if part is None:
+            return (False, "Pièce introuvable.")
+        if part.locked:
+            return (False, f"Pièce '{part.part_name}' verrouillée.")
+        if project_id is not None:
+            if session.get(Project_cls, project_id) is None:
+                return (False, f"Projet introuvable.")
+        part.id_project = project_id
+        session.add(part)
+        session.commit()
+        return (True, "Projet assigné.")
+
+
+def set_part_status_db(part_id: int, new_status: str):
+    """Change le statut Init/Revue/Asset. Retourne (ok, msg)."""
+    if new_status not in ("Init", "Revue", "Asset"):
+        return (False, "Statut invalide.")
+    engine, Parts_cls, _, _, _ = _db()
+    with Session(engine) as session:
+        part = session.get(Parts_cls, part_id)
+        if part is None:
+            return (False, "Pièce introuvable.")
+        if part.locked:
+            return (False, f"Pièce '{part.part_name}' verrouillée.")
+        part.status = new_status
+        session.add(part)
+        session.commit()
+        return (True, f"Statut → {new_status}.")
+
+
+def toggle_part_lock_db(part_id: int):
+    """Inverse le verrou. Retourne (ok, msg, new_locked)."""
+    engine, Parts_cls, _, _, _ = _db()
+    with Session(engine) as session:
+        part = session.get(Parts_cls, part_id)
+        if part is None:
+            return (False, "Pièce introuvable.", None)
+        part.locked = not part.locked
+        session.add(part)
+        session.commit()
+        return (True,
+                "Pièce verrouillée." if part.locked else "Pièce déverrouillée.",
+                part.locked)
 
 
 def fetch_part_detail(part_id: int):
@@ -210,28 +297,58 @@ def dashboard_page():
     # Conteneur principal centre, largeur max
     with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-4"):
 
-        # Barre d'actions : boutons "Projet" et "Nouvelle piece" a droite.
-        # 'Projet' ouvre un dialogue de gestion des projets ; "Nouvelle
-        # piece" cree une piece directement.
-        with ui.row().classes("w-full justify-end gap-2"):
+        # Barre d'actions : filtre projet a gauche, boutons a droite
+        with ui.row().classes("w-full items-center gap-2"):
+            ui.label("Projet :").classes("text-sm text-gray-600")
+            # Le select est rempli dynamiquement (peut etre vide si
+            # aucun projet existe encore). Initialise vide ici, peuple
+            # par refresh_project_filter().
+            project_filter = ui.select(
+                options={"": "Tous les projets"},
+                value="",
+                on_change=lambda _: refresh_list()
+            ).classes("min-w-[200px]")
+
+            # Pousse les boutons a droite
+            ui.element("div").classes("flex-grow")
+
             ui.button("Projet", on_click=lambda: open_projects_dialog()) \
                 .props("color=primary outline").classes("text-base")
             ui.button("+ Nouvelle pièce", on_click=lambda: open_new_part_dialog()) \
                 .props("color=primary").classes("text-base")
 
+        def refresh_project_filter():
+            """Recharge les options du dropdown de filtre projet."""
+            options = {"": "Tous les projets"}
+            for proj in fetch_projects():
+                options[proj["code"]] = f"{proj['code']} — {proj['description'] or '(sans description)'}"
+            # Conserver la valeur actuelle si elle est encore valide
+            current = project_filter.value
+            project_filter.options = options
+            if current not in options:
+                project_filter.value = ""
+            project_filter.update()
+
+        refresh_project_filter()
+
         # Conteneur de la liste, rempli puis re-rempli par refresh_list()
         list_container = ui.column().classes("w-full gap-3")
 
         def refresh_list():
-            """Vide puis re-rempli la liste depuis la base."""
+            """Vide puis re-rempli la liste depuis la base, en
+            appliquant le filtre projet s'il est selectionne."""
             list_container.clear()
-            parts = fetch_parts_full()
+            code = project_filter.value or None
+            parts = fetch_parts_full(project_code=code)
 
             if not parts:
+                msg = ("Aucune pièce dans la base pour l'instant. "
+                       "Cliquez sur « + Nouvelle pièce » ou exportez-en "
+                       "une depuis FreeCAD.")
+                if code:
+                    msg = f"Aucune pièce pour le projet '{code}'."
                 with list_container:
-                    ui.label("Aucune pièce dans la base pour l'instant. "
-                             "Cliquez sur « + Nouvelle pièce » ou exportez-en "
-                             "une depuis FreeCAD.") \
+                    ui.label(msg) \
                         .classes("text-gray-500 text-center p-8")
                 return
 
@@ -366,6 +483,8 @@ def dashboard_page():
                 ui.notify(msg, type="positive")
                 hide_creation_form()
                 refresh_projects_list()
+                # Le dropdown de filtre doit aussi connaitre le nouveau projet
+                refresh_project_filter()
 
         def open_projects_dialog():
             # On rafraichit a chaque ouverture (au cas ou un autre
@@ -385,15 +504,102 @@ def dashboard_page():
 # ======================================================================
 def render_part_row(part: dict, on_change):
     """Rendu d'une ligne de piece. 'on_change' est appele apres une
-    action qui modifie la base (upload photo), pour rafraichir la liste."""
+    action qui modifie la base (upload photo, changement de projet,
+    de statut, de verrou), pour rafraichir la liste."""
 
-    # Carte avec ombre + bordure, comme dans la version HTML
+    part_id = part["id"]
+    locked = part["locked"]
+
+    # Couleurs du badge statut selon la valeur
+    status_colors = {
+        "Init":  "bg-gray-100 text-gray-700",
+        "Revue": "bg-amber-100 text-amber-800",
+        "Asset": "bg-green-100 text-green-800",
+    }
+    status_cls = status_colors.get(part["status"], status_colors["Init"])
+
     with ui.card().classes("w-full p-4"):
-        with ui.row().classes("w-full items-center gap-4 no-wrap"):
+        with ui.row().classes("w-full items-center gap-3 no-wrap"):
 
-            # --- Nom (colonne large) -------------------------------
-            ui.label(part["part_name"]) \
-                .classes("text-base font-medium flex-grow")
+            # --- Verrou (icone cadenas, cliquable) ------------------
+            # Toggle au clic. Visuellement distinct selon l'etat.
+            lock_icon = "lock" if locked else "lock_open"
+            lock_color = "text-red-600" if locked else "text-gray-400"
+
+            def make_toggle_lock(pid=part_id):
+                def handler():
+                    ok, msg, _ = toggle_part_lock_db(pid)
+                    if ok:
+                        ui.notify(msg, type="info")
+                        on_change()
+                    else:
+                        ui.notify(msg, type="negative")
+                return handler
+
+            ui.button(icon=lock_icon, on_click=make_toggle_lock()) \
+                .props(f"flat round dense") \
+                .classes(f"{lock_color} flex-shrink-0") \
+                .tooltip("Verrouillée — cliquer pour déverrouiller"
+                          if locked else "Cliquer pour verrouiller")
+
+            # --- Nom + version (a cote) -----------------------------
+            with ui.column().classes("gap-0 flex-grow"):
+                with ui.row().classes("items-baseline gap-2 no-wrap"):
+                    ui.label(part["part_name"]) \
+                        .classes("text-base font-medium")
+                    if part["version"]:
+                        ui.label(part["version"]) \
+                            .classes("text-xs font-mono text-gray-500")
+
+                # --- Pastille projet (cliquable -> dialogue assign) -
+                with ui.row().classes("items-center gap-1 no-wrap mt-1"):
+                    proj_code = part["project_code"]
+                    if proj_code:
+                        proj_label = ui.label(proj_code) \
+                            .classes("text-xs font-mono font-bold "
+                                      "text-blue-700 bg-blue-50 "
+                                      "px-2 py-0.5 rounded "
+                                      "cursor-pointer hover:bg-blue-100")
+                    else:
+                        proj_label = ui.label("aucun projet") \
+                            .classes("text-xs italic text-gray-400 "
+                                      "px-2 py-0.5 rounded border "
+                                      "border-dashed border-gray-300 "
+                                      "cursor-pointer hover:border-blue-400 "
+                                      "hover:text-blue-500")
+                    if not locked:
+                        proj_label.on("click",
+                                       lambda p=part: open_assign_project_dialog(p, on_change))
+                        proj_label.tooltip("Cliquer pour changer de projet")
+                    else:
+                        proj_label.classes("opacity-60")
+                        proj_label.tooltip("Pièce verrouillée")
+
+                    # --- Badge statut (cliquable -> cycle) ----------
+                    status_label = ui.label(part["status"]) \
+                        .classes(f"text-xs font-semibold {status_cls} "
+                                  f"px-2 py-0.5 rounded")
+                    if not locked:
+                        status_label.classes("cursor-pointer hover:brightness-95")
+                        # Cycle : Init -> Revue -> Asset -> Init
+                        next_status = {"Init": "Revue",
+                                        "Revue": "Asset",
+                                        "Asset": "Init"}
+                        def make_cycle(pid=part_id, current=part["status"]):
+                            def handler():
+                                ok, msg = set_part_status_db(
+                                    pid, next_status[current])
+                                if ok:
+                                    ui.notify(msg, type="info")
+                                    on_change()
+                                else:
+                                    ui.notify(msg, type="negative")
+                            return handler
+                        status_label.on("click", make_cycle())
+                        status_label.tooltip(
+                            f"Cliquer → {next_status[part['status']]}")
+                    else:
+                        status_label.classes("opacity-60")
 
             # --- Vignette CAO (cliquable -> viewer 3D) -------------
             with ui.element("div").classes(
@@ -538,6 +744,147 @@ def part_page(part_id: int):
         with ui.card().classes("w-full"):
             ui.label(f"Dernière révision par {author} le {ts}") \
                 .classes("text-sm text-gray-600")
+
+
+# ======================================================================
+#  DIALOGUE : ASSIGNER UN PROJET A UNE PIECE
+# ======================================================================
+# Fonction globale appelee depuis render_part_row. Construit un
+# dialogue a la volee (un nouveau a chaque clic) qui liste les
+# projets, met en evidence le projet actuel et le "dernier utilise",
+# et permet aussi de creer un projet a la volee.
+def open_assign_project_dialog(part: dict, on_change):
+    projects = fetch_projects()
+    last_used_id = fetch_last_used_project_id()
+    current_id = part["id_project"]
+    part_id = part["id"]
+    part_name = part["part_name"]
+
+    # Construit le dialogue. On le ferme et le detruit apres usage
+    # pour eviter d'accumuler des dialogues a chaque ouverture.
+    with ui.dialog() as dialog, ui.card().classes("min-w-[440px] max-w-[600px]"):
+        ui.label(f"Assigner un projet à « {part_name} »") \
+            .classes("text-lg font-medium")
+
+        list_container = ui.column() \
+            .classes("w-full gap-2 max-h-[360px] overflow-y-auto")
+
+        # Formulaire de creation de projet, masque par defaut
+        with ui.column().classes("w-full gap-2 mt-2") as creation_form:
+            ui.label("Nouveau projet").classes("text-sm font-medium")
+            desc_input = ui.textarea(
+                placeholder="Description (optionnelle)") \
+                .classes("w-full").props("autogrow rows=2")
+            err_label = ui.label("") \
+                .classes("text-red-600 text-sm min-h-[1.2em]")
+            with ui.row().classes("w-full justify-end gap-2"):
+                ui.button("Annuler",
+                          on_click=lambda: hide_creation()) \
+                    .props("flat")
+                ui.button("Créer et assigner",
+                          on_click=lambda: confirm_create_and_assign()) \
+                    .props("color=primary")
+        creation_form.set_visibility(False)
+
+        # Pied : "+ Nouveau projet" / Dissocier / Fermer
+        with ui.row().classes("w-full justify-between gap-2 mt-2"):
+            add_btn = ui.button("+ Nouveau projet",
+                                 on_click=lambda: show_creation()) \
+                .props("color=primary outline")
+            with ui.row().classes("gap-2"):
+                if current_id is not None:
+                    ui.button("Dissocier",
+                              on_click=lambda: do_assign(None)) \
+                        .props("flat color=negative")
+                ui.button("Fermer", on_click=dialog.close).props("flat")
+
+        def render_options():
+            list_container.clear()
+            if not projects:
+                with list_container:
+                    ui.label("Aucun projet pour l'instant. "
+                             "Créez-en un avec « + Nouveau projet ».") \
+                        .classes("text-gray-500 text-sm text-center p-4")
+                return
+            for proj in projects:
+                with list_container:
+                    is_current = (proj["id"] == current_id)
+                    is_last = (proj["id"] == last_used_id and not is_current)
+                    # Bordure speciale si projet courant ou dernier utilise
+                    extra = ""
+                    if is_current:
+                        extra = " border-2 border-blue-500"
+                    elif is_last:
+                        extra = " border-2 border-dashed border-amber-400"
+                    with ui.card().classes(f"w-full p-3 cursor-pointer "
+                                            f"hover:bg-blue-50 transition"
+                                            + extra) as card:
+                        with ui.row().classes("items-start gap-3 no-wrap"):
+                            ui.label(proj["code"]) \
+                                .classes("text-base font-mono font-bold "
+                                          "text-blue-700 bg-blue-50 "
+                                          "px-2 py-1 rounded flex-shrink-0")
+                            with ui.column().classes("gap-0 flex-grow"):
+                                desc = proj["description"] or "(aucune description)"
+                                ui.label(desc) \
+                                    .classes("text-sm text-stone-700 "
+                                              "whitespace-pre-wrap")
+                                if is_current:
+                                    ui.label("Projet actuel") \
+                                        .classes("text-xs text-blue-600 font-medium")
+                                elif is_last:
+                                    ui.label("Dernier utilisé") \
+                                        .classes("text-xs text-amber-600")
+                    # Clic sur la carte = assigner
+                    card.on("click", lambda pid=proj["id"]: do_assign(pid))
+
+        def do_assign(project_id):
+            ok, msg = assign_project_to_part(part_id, project_id)
+            if ok:
+                ui.notify(msg, type="positive")
+                dialog.close()
+                on_change()
+            else:
+                ui.notify(msg, type="negative")
+
+        def show_creation():
+            desc_input.value = ""
+            err_label.text = ""
+            creation_form.set_visibility(True)
+            add_btn.set_visibility(False)
+
+        def hide_creation():
+            creation_form.set_visibility(False)
+            add_btn.set_visibility(True)
+
+        def confirm_create_and_assign():
+            # Cree le projet puis l'assigne immediatement a la piece
+            ok, msg, code = create_project_in_db(desc_input.value or "")
+            if not ok:
+                err_label.text = msg
+                return
+            # Le projet vient d'etre cree : on retrouve son id en
+            # cherchant par code (unique).
+            import main
+            with Session(main.engine) as s:
+                proj = s.exec(
+                    select(main.Project).where(main.Project.code == code)
+                ).first()
+                new_id = proj.id if proj else None
+            if new_id is None:
+                err_label.text = "Projet créé mais introuvable, abandon."
+                return
+            ok2, msg2 = assign_project_to_part(part_id, new_id)
+            if ok2:
+                ui.notify(f"Projet {code} créé et assigné.",
+                          type="positive")
+                dialog.close()
+                on_change()
+            else:
+                ui.notify(msg2, type="negative")
+
+        render_options()
+        dialog.open()
 
 
 # ======================================================================
