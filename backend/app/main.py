@@ -207,10 +207,26 @@ def create_project(description: str = Form(default="")):
 # ----------------------------------------------------------------------
 @app.get("/api/v1/parts")
 def list_parts():
-    """Liste minimale (id + nom) — utilisé par le GUI de la macro."""
+    """Liste enrichie (id + nom + projet + verrou) — utilise par le
+    GUI de la macro FreeCAD pour filtrer par projet et bloquer les
+    selections de pieces verrouillees."""
     with Session(engine) as session:
+        # Pre-charger les codes projet pour eviter une requete par piece
+        projects_by_id = {
+            p.id: p.code
+            for p in session.exec(select(Project)).all()
+        }
         parts = session.exec(select(Parts).order_by(Parts.part_name)).all()
-        return [{"id": p.id, "part_name": p.part_name} for p in parts]
+        return [
+            {
+                "id": p.id,
+                "part_name": p.part_name,
+                "id_project": p.id_project,
+                "project_code": projects_by_id.get(p.id_project),
+                "locked": p.locked,
+            }
+            for p in parts
+        ]
 
 
 @app.get("/api/v1/parts/full")
@@ -657,6 +673,33 @@ async def upload_new_part(
                 detail="Il faut fournir soit 'part_id' (pièce "
                        "existante), soit 'part_name' (nouvelle pièce).",
             )
+
+        # --- PRE-CHECK : verrou ---------------------------------------
+        # On verifie le verrou AVANT de sauver les fichiers : eviter
+        # d'ecrire des fichiers orphelins si la piece est verrouillee.
+        # Couvre les deux cas : part_id direct OU part_name qui matche
+        # une piece existante (fallback de reutilisation).
+        with Session(engine) as quick_session:
+            target_part = None
+            if part_id is not None:
+                target_part = quick_session.get(Parts, part_id)
+                if target_part is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Aucune pièce avec l'id {part_id}.",
+                    )
+            elif part_name:
+                target_part = quick_session.exec(
+                    select(Parts).where(Parts.part_name == part_name)
+                ).first()
+                # Si target_part est None, c'est une nouvelle piece -> OK
+            if target_part is not None and target_part.locked:
+                raise HTTPException(
+                    status_code=423,  # 423 Locked
+                    detail=f"La pièce '{target_part.part_name}' est "
+                           f"verrouillée. Impossible d'ajouter une "
+                           f"nouvelle révision PLM.",
+                )
 
         ts_dt = datetime.now(timezone.utc)
         ts_tag = ts_dt.strftime("%Y%m%d_%H%M%S")

@@ -12,6 +12,7 @@ from PySide6 import QtWidgets, QtCore
 # Configuration de l'adresse de votre serveur FastAPI
 API_BASE = "http://127.0.0.1:8000/api/v1"
 API_LIST = f"{API_BASE}/parts"            # GET  : liste des pièces
+API_PROJECTS = f"{API_BASE}/projects"     # GET  : liste des projets
 API_UPLOAD = f"{API_BASE}/parts/upload"   # POST : envoi d'un export
 
 # Emplacement où FreeCAD mémorise le dernier auteur saisi.
@@ -43,7 +44,8 @@ def remember_author(author):
 # ----------------------------------------------------------------------
 def fetch_existing_parts():
     """Récupère la liste des pièces déjà présentes dans la base.
-    Retourne une liste de dicts {id, part_name}, ou [] si échec."""
+    Format enrichi : id, part_name, id_project, project_code, locked.
+    Retourne [] si l'API est injoignable."""
     try:
         with urllib.request.urlopen(API_LIST, timeout=5) as response:
             data = response.read().decode("utf-8")
@@ -55,19 +57,43 @@ def fetch_existing_parts():
         return []
 
 
+def fetch_existing_projects():
+    """Récupère la liste des projets pour permettre le filtrage.
+    Format : [{id, code, description}, ...]. [] si echec."""
+    try:
+        with urllib.request.urlopen(API_PROJECTS, timeout=5) as response:
+            data = response.read().decode("utf-8")
+            return json.loads(data)
+    except Exception as e:
+        App.Console.PrintWarning(
+            f"⚠️  Impossible de récupérer les projets : {e}\n"
+        )
+        return []
+
+
 # ----------------------------------------------------------------------
 #  BOITE DE DIALOGUE PySide6
 # ----------------------------------------------------------------------
 class PiStockExportDialog(QtWidgets.QDialog):
     """Fenêtre qui demande à quelle pièce associer l'export
-    (existante ou nouvelle) et le nom de l'auteur."""
+    (existante ou nouvelle) et le nom de l'auteur.
 
-    def __init__(self, default_part_name, existing_parts, parent=None):
+    Pour les pièces existantes : un sélecteur de PROJET permet de
+    filtrer la liste, et les pièces verrouillées apparaissent grisées
+    avec un cadenas 🔒 — non sélectionnables."""
+
+    # Cle interne du combobox projet : '' = tous, '__none__' = sans projet
+    PROJECT_ALL = ""
+    PROJECT_NONE = "__none__"
+
+    def __init__(self, default_part_name, existing_parts,
+                 existing_projects, parent=None):
         super().__init__(parent)
         self.setWindowTitle("PiStock — Export vers la base")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(440)
 
-        self.existing_parts = existing_parts  # [{id, part_name}, ...]
+        self.existing_parts = existing_parts        # [{id, part_name, id_project, project_code, locked}, ...]
+        self.existing_projects = existing_projects  # [{id, code, description}, ...]
         # Résultat rempli à la validation :
         self.result_part_id = None     # int   -> pièce existante
         self.result_part_name = None   # str   -> nouvelle pièce
@@ -91,22 +117,41 @@ class PiStockExportDialog(QtWidgets.QDialog):
 
         layout.addWidget(self.radio_existing)
 
-        # Menu déroulant des pièces existantes
+        # --- Filtre projet (nouveau) ---------------------------------
+        # Permet de réduire la liste des pièces affichées en dessous.
+        self.project_combo = QtWidgets.QComboBox()
+        self.project_combo.addItem("Tous les projets", self.PROJECT_ALL)
+        self.project_combo.addItem("(Sans projet)", self.PROJECT_NONE)
+        for proj in existing_projects:
+            desc = proj.get("description") or ""
+            label = f"{proj['code']}"
+            if desc:
+                # Tronque les descriptions trop longues dans le combo
+                short = desc[:40] + ("…" if len(desc) > 40 else "")
+                label = f"{proj['code']} — {short}"
+            # On stocke le CODE projet comme userData pour filtrer
+            self.project_combo.addItem(label, proj["code"])
+        project_row = QtWidgets.QHBoxLayout()
+        project_row.addWidget(QtWidgets.QLabel("    Projet :"))
+        project_row.addWidget(self.project_combo)
+        layout.addLayout(project_row)
+
+        # --- Menu déroulant des pièces existantes --------------------
+        # Rempli/filtré par _refresh_parts_combo() selon le projet choisi.
         self.existing_combo = QtWidgets.QComboBox()
-        for part in existing_parts:
-            # On stocke l'id de la pièce comme "donnée" de l'item
-            self.existing_combo.addItem(part["part_name"], part["id"])
         existing_row = QtWidgets.QHBoxLayout()
         existing_row.addWidget(QtWidgets.QLabel("    Pièce :"))
         existing_row.addWidget(self.existing_combo)
         layout.addLayout(existing_row)
 
+        # Filtrage au changement de projet
+        self.project_combo.currentIndexChanged.connect(
+            self._refresh_parts_combo)
+
         # --- Champ auteur --------------------------------------------
         layout.addSpacing(8)
         author_row = QtWidgets.QHBoxLayout()
         author_row.addWidget(QtWidgets.QLabel("Auteur :"))
-        # Pré-rempli avec le dernier auteur saisi (mémorisé entre
-        # les exports). Au tout premier lancement : nom système.
         self.author_edit = QtWidgets.QLineEdit(get_remembered_author())
         author_row.addWidget(self.author_edit)
         layout.addLayout(author_row)
@@ -120,27 +165,64 @@ class PiStockExportDialog(QtWidgets.QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        # --- État initial des champs ---------------------------------
-        # Si aucune pièce n'existe, on force le mode "nouvelle pièce".
+        # --- État initial --------------------------------------------
         has_existing = len(existing_parts) > 0
         self.radio_existing.setEnabled(has_existing)
-        if has_existing:
-            self.radio_new.setChecked(True)
-        else:
-            self.radio_new.setChecked(True)
+        self.radio_new.setChecked(True)
+        if not has_existing:
             self.existing_combo.setEnabled(False)
+            self.project_combo.setEnabled(False)
 
-        # Active/désactive les champs selon le radio sélectionné
         self.radio_new.toggled.connect(self._update_fields)
+        self._refresh_parts_combo()  # remplit la liste initiale
         self._update_fields()
+
+    def _refresh_parts_combo(self):
+        """Remplit le combo des pièces selon le filtre projet actuel.
+        Les pièces verrouillées sont prefixées 🔒 et désactivées."""
+        filter_code = self.project_combo.currentData()
+        self.existing_combo.clear()
+
+        for part in self.existing_parts:
+            # Filtrage par projet
+            if filter_code == self.PROJECT_ALL:
+                pass  # tout passe
+            elif filter_code == self.PROJECT_NONE:
+                if part.get("id_project") is not None:
+                    continue
+            else:
+                if part.get("project_code") != filter_code:
+                    continue
+
+            locked = part.get("locked", False)
+            # Label avec prefixe verrou si verrouillee
+            label = f"🔒 {part['part_name']} (verrouillée)" if locked \
+                else part["part_name"]
+            self.existing_combo.addItem(label, part["id"])
+
+            # Desactiver l'item si la piece est verrouillee.
+            # En PySide6 on accede a l'item via le modele du combobox.
+            if locked:
+                idx = self.existing_combo.count() - 1
+                item = self.existing_combo.model().item(idx)
+                if item is not None:
+                    item.setEnabled(False)
+
+        # Si la liste resultante est vide (aucune piece pour ce filtre),
+        # on l'indique a l'utilisateur via un item desactive.
+        if self.existing_combo.count() == 0:
+            self.existing_combo.addItem("(aucune pièce)", None)
+            item = self.existing_combo.model().item(0)
+            if item is not None:
+                item.setEnabled(False)
 
     def _update_fields(self):
         """Grise les champs non pertinents selon le mode choisi."""
         is_new = self.radio_new.isChecked()
         self.new_name_edit.setEnabled(is_new)
-        self.existing_combo.setEnabled(
-            (not is_new) and len(self.existing_parts) > 0
-        )
+        has_existing = len(self.existing_parts) > 0
+        self.project_combo.setEnabled((not is_new) and has_existing)
+        self.existing_combo.setEnabled((not is_new) and has_existing)
 
     def on_accept(self):
         """Validation : on vérifie les saisies avant de fermer."""
@@ -164,8 +246,28 @@ class PiStockExportDialog(QtWidgets.QDialog):
             self.result_part_name = name
             self.result_part_id = None
         else:
-            # Pièce existante : on récupère l'id stocké dans l'item
-            self.result_part_id = self.existing_combo.currentData()
+            # Pièce existante : recupere l'id stocke dans l'item
+            chosen_id = self.existing_combo.currentData()
+            if chosen_id is None:
+                # Aucune piece selectionnable (filtre vide)
+                QtWidgets.QMessageBox.warning(
+                    self, "Aucune pièce",
+                    "Aucune pièce sélectionnable avec ce filtre."
+                )
+                return
+            # Double-check : si l'utilisateur a reussi a selectionner
+            # un item desactive (en theorie impossible), on bloque.
+            chosen = next((p for p in self.existing_parts
+                            if p["id"] == chosen_id), None)
+            if chosen and chosen.get("locked"):
+                QtWidgets.QMessageBox.warning(
+                    self, "Pièce verrouillée",
+                    f"La pièce '{chosen['part_name']}' est verrouillée. "
+                    f"Déverrouillez-la depuis l'interface web avant "
+                    f"de pousser une nouvelle révision."
+                )
+                return
+            self.result_part_id = chosen_id
             self.result_part_name = None
 
         self.accept()
@@ -189,11 +291,13 @@ def export_and_send_to_pistock():
     part_name = doc.Name
     App.Console.PrintMessage(f"🚀 Initialisation de l'export PiStock pour : {part_name}\n")
 
-    # 2. Récupération de la liste des pièces existantes (pour le GUI)
+    # 2. Récupération des listes (pièces et projets) pour le GUI
     existing_parts = fetch_existing_parts()
+    existing_projects = fetch_existing_projects()
 
     # 3. Affichage de la boîte de dialogue PySide6
     dialog = PiStockExportDialog(part_name, existing_parts,
+                                 existing_projects,
                                  Gui.getMainWindow())
     if dialog.exec() != QtWidgets.QDialog.Accepted:
         App.Console.PrintMessage("ℹ️  Export annulé par l'utilisateur.\n")
@@ -302,9 +406,26 @@ def export_and_send_to_pistock():
         # On essaie de lire le détail renvoyé par l'API
         try:
             err_body = e.read().decode("utf-8")
+            err_data = json.loads(err_body)
+            err_detail = err_data.get("detail", err_body)
         except Exception:
-            err_body = str(e)
-        App.Console.PrintError(f"❌ Échec de l'opération (HTTP {e.code}) : {err_body}\n")
+            err_detail = str(e)
+
+        # Cas particulier : pièce verrouillée (423) -> pop-up explicite
+        # car cette erreur est attendue dans le flux normal d'utilisation.
+        if e.code == 423:
+            App.Console.PrintWarning(f"🔒 Pièce verrouillée : {err_detail}\n")
+            QtWidgets.QMessageBox.warning(
+                Gui.getMainWindow(),
+                "PiStock — Pièce verrouillée",
+                f"Impossible de pousser cette révision.\n\n{err_detail}\n\n"
+                f"Déverrouillez la pièce depuis l'interface web "
+                f"(http://127.0.0.1:8000/) puis réessayez."
+            )
+        else:
+            App.Console.PrintError(
+                f"❌ Échec de l'opération (HTTP {e.code}) : {err_detail}\n"
+            )
     except Exception as e:
         App.Console.PrintError(f"❌ Échec de l'opération : {str(e)}\n")
 
