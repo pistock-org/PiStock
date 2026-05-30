@@ -313,7 +313,7 @@ def list_parts_full(project_code: str | None = None):
                 "status": p.status,
                 "locked": p.locked,
                 "version": latest_plm.version if latest_plm else None,
-                # Champs existants
+                # URLs des fichiers PLM (relatives a la racine du serveur)
                 "thumbnail_url": (
                     f"/{latest_plm.path_2_thumbnail}"
                     if latest_plm and latest_plm.path_2_thumbnail else None
@@ -321,6 +321,12 @@ def list_parts_full(project_code: str | None = None):
                 "glb_url": (
                     f"/{latest_plm.path_2_3dglb}"
                     if latest_plm and latest_plm.path_2_3dglb else None
+                ),
+                # URL du fichier CAO (.FCStd) : utilise par PiStock Explorer
+                # pour telecharger et ouvrir la piece dans FreeCAD.
+                "cad_url": (
+                    f"/{latest_plm.path_2_cadfile}"
+                    if latest_plm and latest_plm.path_2_cadfile else None
                 ),
                 "last_author": latest_plm.author if latest_plm else None,
                 "last_timestamp": (

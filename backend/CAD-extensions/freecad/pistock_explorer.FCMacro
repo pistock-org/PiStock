@@ -1,0 +1,503 @@
+# PiStock — PLM/inventory tool for FreeCAD-based workshops
+# Copyright (C) 2026 GA3Dtech
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+PiStock Explorer — onglet central FreeCAD pour parcourir les pièces
+de la base PiStock et les ouvrir d'un clic.
+
+Inspiré de la page d'accueil FreeCAD et du projet 4DOverview.
+"""
+
+import os
+import json
+import shutil
+import tempfile
+import urllib.request
+import urllib.error
+import FreeCAD as App
+import FreeCADGui as Gui
+from PySide6 import QtWidgets, QtCore, QtGui
+
+
+# Configuration : hote du serveur PiStock
+API_HOST = "http://127.0.0.1:8000"
+API_PARTS_FULL = f"{API_HOST}/api/v1/parts/full"
+API_PROJECTS = f"{API_HOST}/api/v1/projects"
+
+# Disposition de la grille de thumbnails
+GRID_COLUMNS = 4
+CARD_WIDTH = 180
+CARD_HEIGHT = 230
+THUMB_WIDTH = 160
+THUMB_HEIGHT = 110
+
+# Mapping statut -> couleur de fond (cohérent avec le frontend NiceGUI)
+STATUS_COLORS = {
+    "Init":  ("#f3f4f6", "#374151"),  # fond gris clair / texte gris fonce
+    "Revue": ("#fef3c7", "#92400e"),  # ambre clair / ambre fonce
+    "Asset": ("#d1fae5", "#065f46"),  # vert clair / vert fonce
+}
+
+
+# ======================================================================
+#  COMMUNICATION API
+# ======================================================================
+def fetch_json(url, timeout=5):
+    """GET sur une URL, parse en JSON. Retourne None si echec."""
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        App.Console.PrintWarning(f"⚠️  PiStock API ({url}) : {e}\n")
+        return None
+
+
+def fetch_bytes(url, timeout=10):
+    """GET binaire (pour les thumbnails et les .FCStd)."""
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        return resp.read()
+
+
+# ======================================================================
+#  CARTE D'UNE PIECE
+# ======================================================================
+class PartCard(QtWidgets.QFrame):
+    """Carte d'une piece dans la grille : thumbnail + nom + version + statut.
+    Clic = telecharge le .FCStd et l'ouvre dans FreeCAD. Si pas de CAO,
+    la carte est grisee et non-cliquable."""
+
+    def __init__(self, part: dict, on_click_callback):
+        super().__init__()
+        self.part = part
+        self.on_click_callback = on_click_callback
+
+        self.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        self.setFixedSize(CARD_WIDTH, CARD_HEIGHT)
+        # Style de la carte : bordure douce, fond blanc, hover bleute
+        self.setStyleSheet("""
+            PartCard {
+                background: white;
+                border: 1px solid #d2d2d7;
+                border-radius: 8px;
+            }
+            PartCard:hover {
+                border-color: #0066cc;
+                background: #f5f9ff;
+            }
+        """)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(4)
+        layout.setContentsMargins(8, 8, 8, 8)
+
+        # --- Thumbnail (place-tenu, mis a jour async) -----------------
+        self.thumb_label = QtWidgets.QLabel()
+        self.thumb_label.setFixedSize(THUMB_WIDTH, THUMB_HEIGHT)
+        self.thumb_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.thumb_label.setStyleSheet(
+            "background: #f5f5f7; border-radius: 4px; color: #c7c7cc;"
+        )
+        self.thumb_label.setText("(pas de vignette)")
+        layout.addWidget(self.thumb_label, alignment=QtCore.Qt.AlignCenter)
+
+        # --- Nom de la piece ------------------------------------------
+        name_label = QtWidgets.QLabel(part["part_name"])
+        name_label.setAlignment(QtCore.Qt.AlignCenter)
+        name_label.setStyleSheet("font-weight: 600; font-size: 13px;")
+        name_label.setWordWrap(True)
+        layout.addWidget(name_label)
+
+        # --- Version + statut sur la meme ligne -----------------------
+        bottom_row = QtWidgets.QHBoxLayout()
+        bottom_row.setSpacing(6)
+
+        version_label = QtWidgets.QLabel(part.get("version") or "—")
+        version_label.setStyleSheet(
+            "font-family: monospace; font-weight: bold; "
+            "background: #e0e7ff; color: #1e3a8a; "
+            "padding: 2px 6px; border-radius: 3px; font-size: 11px;"
+        )
+        bottom_row.addWidget(version_label)
+
+        bottom_row.addStretch()
+
+        status = part.get("status") or "Init"
+        bg, fg = STATUS_COLORS.get(status, STATUS_COLORS["Init"])
+        status_label = QtWidgets.QLabel(status)
+        status_label.setStyleSheet(
+            f"background: {bg}; color: {fg}; "
+            f"padding: 2px 8px; border-radius: 3px; "
+            f"font-size: 11px; font-weight: 600;"
+        )
+        bottom_row.addWidget(status_label)
+
+        layout.addLayout(bottom_row)
+
+        # --- Verrou (petite icone si verrouille) ----------------------
+        if part.get("locked"):
+            lock_label = QtWidgets.QLabel("🔒 verrouillée")
+            lock_label.setStyleSheet(
+                "color: #b91c1c; font-size: 10px;")
+            lock_label.setAlignment(QtCore.Qt.AlignCenter)
+            layout.addWidget(lock_label)
+
+        # --- Indicateur si pas de CAO disponible ---------------------
+        # Pour les pieces creees manuellement (sans push FreeCAD)
+        if not part.get("cad_url"):
+            self.setEnabled(False)
+            self.setStyleSheet(self.styleSheet() +
+                "PartCard { background: #fafafa; }")
+            self.setToolTip("Aucun fichier FreeCAD associé à cette pièce.")
+        else:
+            self.setCursor(QtCore.Qt.PointingHandCursor)
+            self.setToolTip(f"Cliquer pour ouvrir « {part['part_name']} »")
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton and self.part.get("cad_url"):
+            self.on_click_callback(self.part)
+
+    def set_thumbnail(self, pixmap: QtGui.QPixmap):
+        """Met a jour la vignette une fois telechargee."""
+        scaled = pixmap.scaled(
+            THUMB_WIDTH, THUMB_HEIGHT,
+            QtCore.Qt.KeepAspectRatio,
+            QtCore.Qt.SmoothTransformation,
+        )
+        self.thumb_label.setPixmap(scaled)
+        self.thumb_label.setText("")  # retire le texte place-tenu
+
+
+# ======================================================================
+#  WIDGET PRINCIPAL
+# ======================================================================
+class PiStockExplorerWidget(QtWidgets.QWidget):
+    """Widget central qui s'affiche comme un onglet FreeCAD."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parts = []       # cache de la derniere liste recue
+        self.projects = []    # cache des projets
+
+        self._build_ui()
+        self.refresh()
+
+    # --- Construction de l'interface --------------------------------
+    def _build_ui(self):
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(16)
+
+        # Titre
+        title = QtWidgets.QLabel("📦 PiStock Explorer")
+        title.setStyleSheet("font-size: 18px; font-weight: 600;")
+        main_layout.addWidget(title)
+
+        # --- Section "Nouveau fichier" -------------------------------
+        new_file_group = QtWidgets.QGroupBox("Nouveau fichier")
+        new_file_layout = QtWidgets.QHBoxLayout(new_file_group)
+        new_file_layout.setSpacing(10)
+
+        self._add_action_button(
+            new_file_layout, "Corps paramétrique",
+            "Créer un corps avec l'atelier PartDesign",
+            self.action_new_partdesign)
+        self._add_action_button(
+            new_file_layout, "Projet d'assemblage",
+            "Créer un projet d'assemblage",
+            self.action_new_assembly)
+        self._add_action_button(
+            new_file_layout, "Fichier vide",
+            "Créer un nouveau fichier FreeCAD vide",
+            self.action_new_empty)
+        self._add_action_button(
+            new_file_layout, "Ouvrir un fichier",
+            "Ouvrir un fichier FreeCAD existant",
+            self.action_open_file)
+        new_file_layout.addStretch()
+        main_layout.addWidget(new_file_group)
+
+        # --- Section PiStock -----------------------------------------
+        pistock_group = QtWidgets.QGroupBox("Pièces PiStock")
+        pistock_layout = QtWidgets.QVBoxLayout(pistock_group)
+
+        # Barre de filtre + actualiser
+        filter_row = QtWidgets.QHBoxLayout()
+        filter_row.addWidget(QtWidgets.QLabel("Projet :"))
+        self.project_combo = QtWidgets.QComboBox()
+        self.project_combo.setMinimumWidth(220)
+        self.project_combo.currentIndexChanged.connect(self._refresh_grid)
+        filter_row.addWidget(self.project_combo)
+        filter_row.addStretch()
+        self.status_label = QtWidgets.QLabel("")
+        self.status_label.setStyleSheet("color: #6b7280; font-size: 12px;")
+        filter_row.addWidget(self.status_label)
+        refresh_btn = QtWidgets.QPushButton("🔄  Actualiser")
+        refresh_btn.clicked.connect(self.refresh)
+        filter_row.addWidget(refresh_btn)
+        pistock_layout.addLayout(filter_row)
+
+        # Zone scrollable contenant la grille de cartes
+        self.scroll = QtWidgets.QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setStyleSheet("QScrollArea { border: none; }")
+        self.grid_container = QtWidgets.QWidget()
+        self.grid_layout = QtWidgets.QGridLayout(self.grid_container)
+        self.grid_layout.setSpacing(12)
+        self.grid_layout.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
+        self.scroll.setWidget(self.grid_container)
+        pistock_layout.addWidget(self.scroll, 1)  # stretch=1
+
+        main_layout.addWidget(pistock_group, 1)  # stretch=1
+
+    def _add_action_button(self, layout, title, subtitle, handler):
+        """Bouton d'action FreeCAD style page d'accueil (titre + sous-titre)."""
+        btn = QtWidgets.QPushButton()
+        btn.setMinimumHeight(60)
+        btn.setMinimumWidth(180)
+        btn.setStyleSheet("""
+            QPushButton {
+                text-align: left;
+                padding: 8px 14px;
+                background: white;
+                border: 1px solid #d2d2d7;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background: #f0f7ff;
+                border-color: #0066cc;
+            }
+        """)
+        # Affichage en deux lignes : titre en gras + sous-titre gris
+        btn.setText(f"{title}\n{subtitle}")
+        # Pour avoir le texte gris sur la 2e ligne, on triche : on met
+        # un QLabel HTML par-dessus le bouton transparent. Mais c'est
+        # complexe ; on garde le texte simple, FreeCAD/Qt rendent ca OK.
+        btn.clicked.connect(handler)
+        layout.addWidget(btn)
+
+    # --- Actions FreeCAD -------------------------------------------
+    # Ces handlers appellent les commandes natives de FreeCAD.
+    def action_new_partdesign(self):
+        # Cree un doc puis ajoute un Body PartDesign
+        Gui.runCommand("Std_New")
+        try:
+            Gui.runCommand("PartDesign_Body")
+        except Exception:
+            App.Console.PrintWarning(
+                "Atelier PartDesign indisponible — document vide créé.\n")
+
+    def action_new_assembly(self):
+        # Assembly_CreateAssembly cree directement un nouveau doc
+        try:
+            Gui.runCommand("Assembly_CreateAssembly")
+        except Exception:
+            App.Console.PrintWarning(
+                "Atelier Assembly indisponible. "
+                "Activez le dans les ateliers FreeCAD.\n")
+            Gui.runCommand("Std_New")
+
+    def action_new_empty(self):
+        Gui.runCommand("Std_New")
+
+    def action_open_file(self):
+        Gui.runCommand("Std_Open")
+
+    # --- Rafraichissement complet (data + UI) -----------------------
+    def refresh(self):
+        """Recharge depuis l'API : projets + pieces, et reconstruit."""
+        self.status_label.setText("Chargement…")
+        QtWidgets.QApplication.processEvents()
+
+        self.projects = fetch_json(API_PROJECTS) or []
+        self.parts = fetch_json(API_PARTS_FULL) or []
+
+        # Reconstruire le combobox projet (en preservant la selection)
+        old_value = self.project_combo.currentData()
+        # Bloque les signaux pendant la reconstruction pour eviter un
+        # refresh en boucle.
+        self.project_combo.blockSignals(True)
+        self.project_combo.clear()
+        self.project_combo.addItem("Tous les projets", "")
+        self.project_combo.addItem("(Sans projet)", "__none__")
+        for proj in self.projects:
+            label = f"{proj['code']}"
+            if proj.get("description"):
+                short = proj["description"][:30]
+                if len(proj["description"]) > 30:
+                    short += "…"
+                label = f"{proj['code']} — {short}"
+            self.project_combo.addItem(label, proj["code"])
+        # Restaure la selection si toujours valide
+        if old_value:
+            for i in range(self.project_combo.count()):
+                if self.project_combo.itemData(i) == old_value:
+                    self.project_combo.setCurrentIndex(i)
+                    break
+        self.project_combo.blockSignals(False)
+
+        self._refresh_grid()
+
+    def _refresh_grid(self):
+        """Vide et reconstruit la grille selon le filtre projet."""
+        # 1. Vide la grille existante
+        while self.grid_layout.count() > 0:
+            item = self.grid_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+
+        # 2. Filtre les pieces selon le projet selectionne
+        filter_code = self.project_combo.currentData()
+        if filter_code == "":
+            filtered = list(self.parts)
+        elif filter_code == "__none__":
+            filtered = [p for p in self.parts
+                        if p.get("id_project") is None]
+        else:
+            filtered = [p for p in self.parts
+                        if p.get("project_code") == filter_code]
+
+        # 3. Mise a jour du compteur en barre
+        if not filtered:
+            self.status_label.setText("Aucune pièce")
+            empty = QtWidgets.QLabel(
+                "Aucune pièce correspondant à ce filtre.\n"
+                "Utilisez la macro PiStock Exporter pour publier "
+                "depuis un document, ou créez une pièce manuellement "
+                "via l'interface web.")
+            empty.setAlignment(QtCore.Qt.AlignCenter)
+            empty.setStyleSheet("color: #6b7280; padding: 40px;")
+            self.grid_layout.addWidget(empty, 0, 0, 1, GRID_COLUMNS)
+            return
+        else:
+            self.status_label.setText(
+                f"{len(filtered)} pièce(s)")
+
+        # 4. Place les cartes dans la grille
+        cards = []
+        for idx, part in enumerate(filtered):
+            row = idx // GRID_COLUMNS
+            col = idx % GRID_COLUMNS
+            card = PartCard(part, self._open_part)
+            self.grid_layout.addWidget(card, row, col)
+            cards.append(card)
+
+        # 5. Telecharge les thumbnails en sequence apres l'affichage
+        # initial. On utilise QApplication.processEvents() entre chaque
+        # pour que Qt redessine — UX moins fluide qu'un vrai thread,
+        # mais BEAUCOUP plus simple et largement suffisant pour des
+        # listes de quelques dizaines de pieces.
+        QtWidgets.QApplication.processEvents()
+        for card in cards:
+            thumb_url = card.part.get("thumbnail_url")
+            if not thumb_url:
+                continue
+            try:
+                data = fetch_bytes(API_HOST + thumb_url, timeout=5)
+                pix = QtGui.QPixmap()
+                pix.loadFromData(data)
+                if not pix.isNull():
+                    card.set_thumbnail(pix)
+            except Exception as e:
+                App.Console.PrintWarning(
+                    f"Thumbnail {thumb_url} : {e}\n")
+            QtWidgets.QApplication.processEvents()
+
+    # --- Telechargement et ouverture d'une piece -------------------
+    def _open_part(self, part: dict):
+        """Telecharge le .FCStd dans /tmp puis l'ouvre dans FreeCAD."""
+        cad_url = part.get("cad_url")
+        if not cad_url:
+            return
+
+        full_url = API_HOST + cad_url
+        part_name = part["part_name"]
+        # Nom du fichier local : on prefixe pour reconnaitre que ca
+        # vient de PiStock + on garde le nom original pour la lisibilite.
+        original_name = cad_url.split("/")[-1]  # ex: bracket_20260530_104730.FCStd
+        local_path = os.path.join(tempfile.gettempdir(),
+                                   f"pistock_{original_name}")
+
+        App.Console.PrintMessage(
+            f"⬇️  Téléchargement de '{part_name}' depuis {full_url}…\n")
+        try:
+            with urllib.request.urlopen(full_url, timeout=15) as resp:
+                with open(local_path, "wb") as f:
+                    shutil.copyfileobj(resp, f)
+        except Exception as e:
+            App.Console.PrintError(
+                f"❌ Échec téléchargement '{part_name}' : {e}\n")
+            QtWidgets.QMessageBox.warning(
+                self, "PiStock — Erreur",
+                f"Impossible de télécharger « {part_name} » :\n{e}")
+            return
+
+        App.Console.PrintMessage(
+            f"✔️  Téléchargé : {local_path}\n"
+            f"📂 Ouverture dans FreeCAD…\n")
+        try:
+            App.openDocument(local_path)
+        except Exception as e:
+            App.Console.PrintError(
+                f"❌ Impossible d'ouvrir le document : {e}\n")
+            QtWidgets.QMessageBox.warning(
+                self, "PiStock — Erreur",
+                f"Le fichier a été téléchargé dans :\n{local_path}\n\n"
+                f"Mais FreeCAD n'a pas pu l'ouvrir :\n{e}")
+
+
+# ======================================================================
+#  INTEGRATION DANS FreeCAD : sous-fenetre MDI
+# ======================================================================
+def show_pistock_explorer():
+    """Affiche le PiStock Explorer comme un onglet central FreeCAD.
+    Si une instance existe deja, la remet au premier plan plutot que
+    d'en ouvrir une nouvelle."""
+    mw = Gui.getMainWindow()
+    if mw is None:
+        App.Console.PrintError("Pas de fenêtre principale FreeCAD.\n")
+        return
+
+    mdi = mw.findChild(QtWidgets.QMdiArea)
+    if mdi is None:
+        App.Console.PrintError(
+            "Impossible de trouver la zone MDI centrale de FreeCAD.\n")
+        return
+
+    # Reuse : si une fenetre PiStock Explorer existe deja, on la rouvre.
+    for sub in mdi.subWindowList():
+        if sub.windowTitle() == "PiStock Explorer":
+            sub.show()
+            mdi.setActiveSubWindow(sub)
+            # On rafraichit pour avoir les dernieres donnees.
+            w = sub.widget()
+            if isinstance(w, PiStockExplorerWidget):
+                w.refresh()
+            return
+
+    explorer = PiStockExplorerWidget()
+    sub = QtWidgets.QMdiSubWindow()
+    sub.setWidget(explorer)
+    sub.setWindowTitle("PiStock Explorer")
+    # WA_DeleteOnClose : la sous-fenetre est detruite quand on la
+    # ferme, evite l'accumulation memoire si on relance la macro.
+    sub.setAttribute(QtCore.Qt.WA_DeleteOnClose)
+    mdi.addSubWindow(sub)
+    sub.showMaximized()
+
+
+# Lancement de l'explorer
+show_pistock_explorer()
