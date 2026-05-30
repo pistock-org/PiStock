@@ -74,6 +74,32 @@ def _apply_user_lang():
     set_lang(lang)
 
 
+def _register_pwa():
+    """Injecte les balises PWA dans le <head> : manifest, theme-color,
+    icone et enregistrement du service worker. A appeler depuis chaque
+    @ui.page pour que l'app soit installable.
+
+    Le service worker n'est actif qu'en HTTPS ou sur localhost (limite
+    standard des navigateurs). Sur un Pi accédé via http://192.168.x.y
+    depuis un mobile, le SW ne s'enregistrera pas, mais le manifest
+    et les meta tags resteront utiles."""
+    ui.add_head_html('''
+        <link rel="manifest" href="/static/manifest.json">
+        <meta name="theme-color" content="#292524">
+        <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+        <link rel="apple-touch-icon" href="/static/icon.svg">
+        <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/static/service-worker.js')
+                    .then(reg => console.log('PiStock SW registered:', reg.scope))
+                    .catch(err => console.warn('PiStock SW failed:', err));
+            });
+        }
+        </script>
+    ''')
+
+
 def render_app_header(title_key: str):
     """En-tete commun aux pages : titre a gauche, selecteur de langue
     et lien vers le code source a droite (obligation AGPLv3).
@@ -706,6 +732,7 @@ def dashboard_page():
     # Applique la langue choisie par l'utilisateur AVANT de construire
     # quoi que ce soit (les premiers appels a _() en dependent).
     _apply_user_lang()
+    _register_pwa()
 
     # JavaScript injecte au <head> de la page. Comme NiceGUI 3.x
     # sanitise le contenu de ui.html() et RETIRE les attributs 'on*'
@@ -774,7 +801,216 @@ def dashboard_page():
                     alert("Erreur : " + err.message);
                 }
             });
+
+            // ---- Listener pour les BOUTONS CAPTURE CAMERA ----
+            // Cible : a[data-pistock-capture="{part_id}"]
+            // Au clic : appelle pistockCapturePhoto(part_id) qui ouvre
+            // un dialogue avec le live preview de la camera.
+            document.addEventListener('click', function(e) {
+                const trigger = e.target.closest('[data-pistock-capture]');
+                if (!trigger) return;
+                e.preventDefault();
+                const partId = trigger.dataset.pistockCapture;
+                pistockCapturePhoto(parseInt(partId, 10));
+            });
         }
+
+        // ===================================================
+        //  FONCTION DE CAPTURE PHOTO VIA getUserMedia
+        // ===================================================
+        // Ouvre un dialogue plein ecran avec un live preview de la
+        // camera. L'utilisateur clique "Capturer" -> aperçu de la
+        // photo + boutons "Enregistrer" / "Reprendre". L'envoi se
+        // fait vers POST /api/v1/parts/{id}/stock-photo (le meme
+        // endpoint que pour l'upload fichier), puis reload de la page.
+        window.pistockCapturePhoto = async function(partId) {
+            // Verification : navigator.mediaDevices n'est dispo que
+            // sur les contextes HTTPS (sauf localhost). Sur du HTTP
+            // depuis une autre machine, on previent l'utilisateur.
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert(
+                    "La caméra n'est accessible qu'en HTTPS ou en localhost.\\n\\n" +
+                    "Pour un accès depuis une autre machine, configurez " +
+                    "HTTPS (certificat auto-signé ou reverse-proxy)."
+                );
+                return;
+            }
+
+            // --- Construction du dialogue en JS pur --------------
+            // (pas de NiceGUI ici, on garde tout cote client pour
+            // simplifier la gestion du media stream)
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);' +
+                'display:flex;align-items:center;justify-content:center;z-index:9999;' +
+                'padding:20px;';
+            const dialog = document.createElement('div');
+            dialog.style.cssText = 'background:white;border-radius:12px;padding:20px;' +
+                'max-width:95vw;max-height:95vh;display:flex;flex-direction:column;' +
+                'align-items:center;gap:12px;';
+            dialog.innerHTML =
+                '<h3 style="margin:0;font-size:18px;font-weight:600;">' +
+                'Capture photo — pièce ' + partId + '</h3>' +
+                '<div style="position:relative;">' +
+                '  <video id="pistock-cam-video" autoplay playsinline muted ' +
+                '         style="max-width:80vw;max-height:60vh;border-radius:8px;' +
+                '         background:#000;"></video>' +
+                '  <img id="pistock-cam-preview" style="display:none;max-width:80vw;' +
+                '       max-height:60vh;border-radius:8px;">' +
+                '</div>' +
+                '<canvas id="pistock-cam-canvas" style="display:none;"></canvas>' +
+                '<div id="pistock-cam-status" style="font-size:13px;color:#6b7280;' +
+                '     min-height:20px;"></div>' +
+                '<div id="pistock-cam-actions" style="display:flex;gap:10px;">' +
+                '  <button id="pistock-cam-capture-btn" ' +
+                '          style="padding:10px 20px;background:#2563eb;color:white;' +
+                '          border:none;border-radius:6px;font-size:14px;cursor:pointer;">' +
+                '    📷 Capturer</button>' +
+                '  <button id="pistock-cam-retake-btn" style="display:none;' +
+                '          padding:10px 20px;background:#6b7280;color:white;border:none;' +
+                '          border-radius:6px;font-size:14px;cursor:pointer;">' +
+                '    ↻ Reprendre</button>' +
+                '  <button id="pistock-cam-save-btn" style="display:none;' +
+                '          padding:10px 20px;background:#16a34a;color:white;border:none;' +
+                '          border-radius:6px;font-size:14px;cursor:pointer;">' +
+                '    💾 Enregistrer</button>' +
+                '  <button id="pistock-cam-cancel-btn" ' +
+                '          style="padding:10px 20px;background:#dc2626;color:white;' +
+                '          border:none;border-radius:6px;font-size:14px;cursor:pointer;">' +
+                '    ✕ Annuler</button>' +
+                '</div>';
+            overlay.appendChild(dialog);
+            document.body.appendChild(overlay);
+
+            const video = document.getElementById('pistock-cam-video');
+            const canvas = document.getElementById('pistock-cam-canvas');
+            const preview = document.getElementById('pistock-cam-preview');
+            const status = document.getElementById('pistock-cam-status');
+            const captureBtn = document.getElementById('pistock-cam-capture-btn');
+            const retakeBtn = document.getElementById('pistock-cam-retake-btn');
+            const saveBtn = document.getElementById('pistock-cam-save-btn');
+            const cancelBtn = document.getElementById('pistock-cam-cancel-btn');
+
+            let stream = null;
+            let capturedBlob = null;
+
+            const cleanup = () => {
+                if (stream) {
+                    stream.getTracks().forEach(t => t.stop());
+                    stream = null;
+                }
+                overlay.remove();
+            };
+
+            // Lance le stream camera. facingMode='environment' = camera
+            // arriere sur mobile (la plus utile pour photographier
+            // une piece devant soi). Fallback sur 'user' si refuse.
+            try {
+                status.textContent = "Démarrage de la caméra…";
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { ideal: 'environment' },
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
+                    },
+                    audio: false
+                });
+                video.srcObject = stream;
+                status.textContent = "Cadrez la pièce puis cliquez sur « Capturer »";
+            } catch (err) {
+                status.textContent = "";
+                let msg = "Caméra inaccessible : " + (err.message || err.name);
+                if (err.name === 'NotAllowedError') {
+                    msg = "Accès caméra refusé. Autorisez-le dans les " +
+                          "paramètres du navigateur.";
+                } else if (err.name === 'NotFoundError') {
+                    msg = "Aucune caméra détectée sur cet appareil.";
+                }
+                alert(msg);
+                cleanup();
+                return;
+            }
+
+            // Clic "Capturer" -> dessine la frame courante du video
+            // dans le canvas, convertit en blob JPEG, affiche l'aperçu.
+            captureBtn.addEventListener('click', () => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                canvas.toBlob((blob) => {
+                    if (!blob) {
+                        alert("Échec de la capture.");
+                        return;
+                    }
+                    capturedBlob = blob;
+                    preview.src = URL.createObjectURL(blob);
+                    video.style.display = 'none';
+                    preview.style.display = 'block';
+                    captureBtn.style.display = 'none';
+                    retakeBtn.style.display = 'inline-block';
+                    saveBtn.style.display = 'inline-block';
+                    status.textContent = "Aperçu — Enregistrer ou Reprendre ?";
+                }, 'image/jpeg', 0.85);
+            });
+
+            // Clic "Reprendre" -> on retourne au live preview
+            retakeBtn.addEventListener('click', () => {
+                if (preview.src) URL.revokeObjectURL(preview.src);
+                preview.src = '';
+                capturedBlob = null;
+                video.style.display = 'block';
+                preview.style.display = 'none';
+                captureBtn.style.display = 'inline-block';
+                retakeBtn.style.display = 'none';
+                saveBtn.style.display = 'none';
+                status.textContent = "Cadrez la pièce puis cliquez sur « Capturer »";
+            });
+
+            // Clic "Enregistrer" -> POST vers l'endpoint stock-photo
+            saveBtn.addEventListener('click', async () => {
+                if (!capturedBlob) return;
+                status.textContent = "Envoi en cours…";
+                saveBtn.disabled = true;
+                retakeBtn.disabled = true;
+                const formData = new FormData();
+                // Le serveur accepte n'importe quel nom de fichier ; on
+                // utilise un nom qui indique l'origine (camera) + la date.
+                const ts = new Date().toISOString().replace(/[:.]/g, '-');
+                formData.append('photo', capturedBlob, 'camera_' + ts + '.jpg');
+                try {
+                    const response = await fetch(
+                        '/api/v1/parts/' + partId + '/stock-photo',
+                        { method: 'POST', body: formData }
+                    );
+                    if (!response.ok) {
+                        const err = await response.json().catch(() => ({}));
+                        alert("Erreur upload : " + (err.detail || response.status));
+                        saveBtn.disabled = false;
+                        retakeBtn.disabled = false;
+                        status.textContent = "Échec — vous pouvez réessayer";
+                        return;
+                    }
+                    cleanup();
+                    window.location.reload();
+                } catch (err) {
+                    alert("Erreur réseau : " + err.message);
+                    saveBtn.disabled = false;
+                    retakeBtn.disabled = false;
+                    status.textContent = "Échec — vous pouvez réessayer";
+                }
+            });
+
+            // Clic "Annuler" -> ferme le dialogue, coupe la camera
+            cancelBtn.addEventListener('click', cleanup);
+            // Echappe = Annuler aussi
+            const escHandler = (e) => {
+                if (e.key === 'Escape') {
+                    cleanup();
+                    document.removeEventListener('keydown', escHandler);
+                }
+            };
+            document.addEventListener('keydown', escHandler);
+        };
         </script>
     ''')
 
@@ -1154,9 +1390,7 @@ def render_stock_photo_cell(part: dict, on_change):
     _ = on_change
 
     if part["stock_img_url"]:
-        # Photo existante : on l'affiche, avec un petit lien "Remplacer"
-        # en dessous (label sur un input file cache).
-        # data-stock-upload="{id}" : detecte par le listener global.
+        # Photo existante : 📁 (file) ou 📷 (camera) à droite
         ui.html(f'''
             <div class="flex flex-col items-center gap-1 flex-shrink-0">
                 <div class="w-20 h-20 bg-stone-100 rounded-lg flex items-center justify-center overflow-hidden">
@@ -1164,27 +1398,37 @@ def render_stock_photo_cell(part: dict, on_change):
                          alt="Photo stock"
                          class="w-full h-full object-contain">
                 </div>
-                <label class="text-xs text-blue-600 cursor-pointer hover:underline">
-                    Remplacer
-                    <input type="file" accept="image/*" style="display:none"
-                           data-stock-upload="{part_id}">
-                </label>
+                <div class="flex gap-2 text-xs">
+                    <label class="text-blue-600 cursor-pointer hover:underline">
+                        📁
+                        <input type="file" accept="image/*" style="display:none"
+                               data-stock-upload="{part_id}">
+                    </label>
+                    <a class="text-blue-600 cursor-pointer hover:underline"
+                       data-pistock-capture="{part_id}"
+                       title="Prendre une photo">📷</a>
+                </div>
             </div>
         ''')
     else:
-        # Pas de photo : gros bouton dashed avec emoji et "Ajouter"
+        # Pas de photo : gros bouton pour fichier + petit lien camera
         ui.html(f'''
-            <label class="cursor-pointer flex-shrink-0" title="Ajouter une photo de la pièce en stock">
-                <div class="w-20 h-20 border-2 border-dashed border-stone-300 rounded-lg
-                            flex flex-col items-center justify-center gap-0
-                            text-stone-500 transition
-                            hover:border-blue-500 hover:text-blue-500 hover:bg-blue-50">
-                    <span class="text-2xl leading-none">📷</span>
-                    <span class="text-xs mt-1">Ajouter</span>
-                </div>
-                <input type="file" accept="image/*" style="display:none"
-                       data-stock-upload="{part_id}">
-            </label>
+            <div class="flex flex-col items-center gap-1 flex-shrink-0">
+                <label class="cursor-pointer" title="Ajouter une photo de la pièce en stock">
+                    <div class="w-20 h-20 border-2 border-dashed border-stone-300 rounded-lg
+                                flex flex-col items-center justify-center gap-0
+                                text-stone-500 transition
+                                hover:border-blue-500 hover:text-blue-500 hover:bg-blue-50">
+                        <span class="text-2xl leading-none">📁</span>
+                        <span class="text-xs mt-1">Fichier</span>
+                    </div>
+                    <input type="file" accept="image/*" style="display:none"
+                           data-stock-upload="{part_id}">
+                </label>
+                <a class="text-xs text-blue-600 cursor-pointer hover:underline"
+                   data-pistock-capture="{part_id}"
+                   title="Prendre une photo avec la caméra">📷 Caméra</a>
+            </div>
         ''')
 
 
@@ -1196,6 +1440,7 @@ def part_page(part_id: int):
     """Page viewer 3D pour une piece donnee, avec liste des
     revisions PLM sous le viewer."""
     _apply_user_lang()
+    _register_pwa()
     part = fetch_part_detail(part_id)
 
     # Charger model-viewer (web component de Google, Apache 2.0).
