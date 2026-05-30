@@ -1,3 +1,19 @@
+# PiStock — PLM/inventory tool for FreeCAD-based workshops
+# Copyright (C) 2026 GA3Dtech
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import os
 import logging
 import traceback
@@ -935,6 +951,20 @@ async def upload_new_part(
 #    via une URL HTTP, pas un chemin disque).
 uploads_root = os.path.join(DATA_DIR, "uploads")
 app.mount("/uploads", StaticFiles(directory=uploads_root), name="uploads")
+
+# 2. Assets statiques du frontend (model-viewer.min.js, etc.)
+#    Permet de servir des libs JS en local plutot que via un CDN
+#    -> autonomie complete sans internet, et meilleur controle.
+FRONTEND_STATIC = os.path.abspath(
+    os.path.join(BASE_DIR, "../../frontend/static")
+)
+if os.path.isdir(FRONTEND_STATIC):
+    app.mount("/static", StaticFiles(directory=FRONTEND_STATIC),
+              name="frontend_static")
+    logger.info(f"Static frontend assets servis depuis {FRONTEND_STATIC}")
+else:
+    logger.warning(f"Dossier static frontend introuvable : {FRONTEND_STATIC}. "
+                    f"Le viewer 3D essaiera de charger depuis CDN.")
 
 # 2. L'interface NiceGUI est définie dans frontend/ui.py et s'attache
 #    au MEME FastAPI 'app'. Donc tout tourne sur le meme port :

@@ -1,0 +1,33 @@
+PiStock — PLM/inventory tool
+Copyright (C) 2026 GA3Dtech
+
+This software is licensed under the GNU Affero General Public License
+v3.0 or later. See the LICENSE file for the full text, or
+https://www.gnu.org/licenses/agpl-3.0.html
+
+----------------------------------------------------------------------
+Third-party software bundled or used at runtime:
+----------------------------------------------------------------------
+
+  - NiceGUI (MIT)               https://github.com/zauberzeug/nicegui
+  - FastAPI (MIT)               https://github.com/tiangolo/fastapi
+  - SQLModel (MIT)              https://github.com/tiangolo/sqlmodel
+  - Pydantic (MIT)              https://github.com/pydantic/pydantic
+  - Starlette (BSD-3-Clause)    https://github.com/encode/starlette
+  - Uvicorn (BSD-3-Clause)      https://github.com/encode/uvicorn
+  - python-multipart (Apache 2.0)
+                                https://github.com/Kludex/python-multipart
+  - Vue.js (MIT, via NiceGUI)   https://github.com/vuejs/core
+  - Quasar (MIT, via NiceGUI)   https://github.com/quasarframework/quasar
+  - Tailwind CSS (MIT, via NiceGUI)
+                                https://github.com/tailwindlabs/tailwindcss
+  - <model-viewer> (Apache 2.0) https://github.com/google/model-viewer
+      Copyright 2018 Google LLC. All Rights Reserved.
+  - Three.js (MIT, via model-viewer)
+                                https://github.com/mrdoob/three.js
+  - PySide6 (LGPLv3) — used in the FreeCAD macro
+                                https://wiki.qt.io/Qt_for_Python
+  - FreeCAD (LGPLv2+) — host application of the macro
+                                https://github.com/FreeCAD/FreeCAD
+
+All listed dependencies use licenses compatible with AGPLv3.

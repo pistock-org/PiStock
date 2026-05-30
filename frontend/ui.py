@@ -1,3 +1,19 @@
+# PiStock — PLM/inventory tool for FreeCAD-based workshops
+# Copyright (C) 2026 GA3Dtech
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 """
 Interface NiceGUI pour PiStock.
 
@@ -25,6 +41,29 @@ def _db():
     """Helper qui renvoie tous les symboles dont on a besoin depuis main."""
     import main
     return main.engine, main.Parts, main.PLM, main.Stock, main.DATA_DIR
+
+
+# ----------------------------------------------------------------------
+#  CONFORMITE AGPLv3 : lien vers le code source
+# ----------------------------------------------------------------------
+# L'AGPLv3 exige que les utilisateurs accedant a l'application via le
+# reseau puissent obtenir le code source. On expose un lien visible
+# dans le header de chaque page pour s'acquitter de cette obligation.
+SOURCE_CODE_URL = "https://github.com/GA3Dtech/PiStock"
+
+
+def render_app_header(title: str):
+    """En-tete commun aux pages : titre a gauche, lien vers le code
+    source a droite (obligation AGPLv3)."""
+    with ui.header().classes("bg-stone-800 text-white shadow"):
+        with ui.row().classes("w-full items-center no-wrap"):
+            ui.label(title).classes("text-xl font-medium")
+            ui.element("div").classes("flex-grow")  # spacer
+            ui.link("Code source (AGPLv3)",
+                    SOURCE_CODE_URL,
+                    new_tab=True) \
+                .classes("text-stone-300 hover:text-white "
+                          "text-sm no-underline")
 
 
 def _db_project():
@@ -461,8 +500,7 @@ def dashboard_page():
     ''')
 
     # En-tete sombre, comme dans la version HTML
-    with ui.header().classes("bg-stone-800 text-white shadow"):
-        ui.label("📦 PiStock — Catalogue").classes("text-xl font-medium")
+    render_app_header("📦 PiStock — Catalogue")
 
     # Conteneur principal centre, largeur max
     with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-4"):
@@ -878,18 +916,24 @@ def part_page(part_id: int):
     revisions PLM sous le viewer."""
     part = fetch_part_detail(part_id)
 
-    # Charger model-viewer (web component de Google) dans le <head>.
-    # Bien meilleur que ui.scene pour les .glb FreeCAD : auto-fit
-    # camera, eclairage PBR, gestion des double-faces, OrbitControls
-    # propres. Le 'type=module' est requis (model-viewer est une lib ES).
+    # Charger model-viewer (web component de Google, Apache 2.0).
+    # On charge en LOCAL depuis /static/model-viewer.min.js, servi
+    # par le mount FastAPI sur frontend/static/. Cela rend l'app
+    # 100% autonome (pas de dependance CDN, fonctionne offline).
+    # Si le fichier local est absent, on tombe sur le CDN via un
+    # petit script de fallback.
     ui.add_head_html('''
-        <script type="module"
-                src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js">
+        <script type="module" src="/static/model-viewer.min.js"
+                onerror="this.onerror=null;
+                         const s=document.createElement('script');
+                         s.type='module';
+                         s.src='https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js';
+                         document.head.appendChild(s);
+                         console.warn('model-viewer local manquant, fallback CDN');">
         </script>
     ''')
 
-    with ui.header().classes("bg-stone-800 text-white shadow"):
-        ui.label("📦 PiStock — Vue 3D").classes("text-xl font-medium")
+    render_app_header("📦 PiStock — Vue 3D")
 
     with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-4"):
 
