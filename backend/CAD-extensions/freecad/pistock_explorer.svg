@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" fill="#292524" rx="10"/>
+  <!-- Grille de 4 vignettes -->
+  <rect x="8"  y="8"  width="20" height="20" fill="none"
+        stroke="#fbbf24" stroke-width="3" rx="2"/>
+  <rect x="32" y="8"  width="20" height="20" fill="none"
+        stroke="#fbbf24" stroke-width="3" rx="2"/>
+  <rect x="8"  y="32" width="20" height="20" fill="none"
+        stroke="#fbbf24" stroke-width="3" rx="2"/>
+  <rect x="32" y="32" width="20" height="20" fill="none"
+        stroke="#fbbf24" stroke-width="3" rx="2"/>
+  <!-- Loupe en haut-droite, qui dépasse pour donner du dynamisme -->
+  <circle cx="46" cy="44" r="10" fill="#292524"
+          stroke="#fbbf24" stroke-width="4"/>
+  <line x1="53" y1="51" x2="60" y2="58"
+        stroke="#fbbf24" stroke-width="4" stroke-linecap="round"/>
+</svg>

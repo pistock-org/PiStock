@@ -100,15 +100,32 @@ def _register_pwa():
     ''')
 
 
-def render_app_header(title_key: str):
-    """En-tete commun aux pages : titre a gauche, selecteur de langue
+def render_app_header(title_key: str, show_home: bool = False):
+    """En-tete commun aux pages : titre a gauche, sélecteur de langue
     et lien vers le code source a droite (obligation AGPLv3).
 
-    'title_key' est un msgid qui sera traduit via _()."""
+    'title_key' est un msgid qui sera traduit via _().
+    'show_home' affiche un bouton 🏠 vers le catalogue (par defaut
+    False : la page catalogue elle-meme ne doit pas l'afficher)."""
     with ui.header().classes("bg-stone-800 text-white shadow"):
         with ui.row().classes("w-full items-center no-wrap gap-3"):
             ui.label(_(title_key)).classes("text-xl font-medium")
             ui.element("div").classes("flex-grow")  # spacer
+
+            # --- Bouton retour catalogue (pages secondaires uniquement)
+            if show_home:
+                ui.button(icon="home",
+                           on_click=lambda: ui.navigate.to("/")) \
+                    .props("flat round dense color=white") \
+                    .tooltip("Retour au catalogue")
+
+            # --- Bouton actualiser (toutes les pages) -----------------
+            # Recharge la page courante. Plus simple pour l'utilisateur
+            # final qu'un F5 et ne perd pas la navigation (URL inchangee).
+            ui.button(icon="refresh",
+                       on_click=lambda: ui.navigate.reload()) \
+                .props("flat round dense color=white") \
+                .tooltip("Actualiser la page")
 
             # --- Selecteur de langue --------------------------------
             # Toggle EN/FR. Au changement : on stocke la preference
@@ -1519,7 +1536,7 @@ def part_page(part_id: int):
         </script>
     ''')
 
-    render_app_header("PiStock — 3D View")
+    render_app_header("PiStock — 3D View", show_home=True)
 
     with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-4"):
 
@@ -2460,7 +2477,7 @@ def plugins_index_page():
     _apply_user_lang()
     _register_pwa()
     ui.page_title("PiStock — Plugins")
-    render_app_header("Plugins")
+    render_app_header("Plugins", show_home=True)
 
     with ui.column().classes("max-w-5xl mx-auto p-4 w-full gap-4"):
         if not PLUGINS_LIST:

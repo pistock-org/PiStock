@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" fill="#292524" rx="10"/>
+  <!-- Cube isométrique à gauche (l'assemblage) -->
+  <g stroke="#fbbf24" stroke-width="2.5" stroke-linejoin="round" fill="none">
+    <!-- Face avant -->
+    <path d="M8 22 L8 40 L20 46 L20 28 Z"/>
+    <!-- Face supérieure -->
+    <path d="M8 22 L20 16 L32 22 L20 28 Z"/>
+    <!-- Face droite -->
+    <path d="M20 28 L20 46 L32 40 L32 22 Z"/>
+  </g>
+  <!-- Flèche du milieu -->
+  <path d="M36 32 L48 32 M44 28 L48 32 L44 36"
+        fill="none" stroke="#fbbf24" stroke-width="3"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Liste à puces à droite -->
+  <circle cx="40" cy="16" r="1.8" fill="#fbbf24"/>
+  <line x1="46" y1="16" x2="58" y2="16"
+        stroke="#fbbf24" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="40" cy="48" r="1.8" fill="#fbbf24"/>
+  <line x1="46" y1="48" x2="58" y2="48"
+        stroke="#fbbf24" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="40" cy="56" r="1.8" fill="#fbbf24"/>
+  <line x1="46" y1="56" x2="58" y2="56"
+        stroke="#fbbf24" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

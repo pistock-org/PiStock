@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Fond commun PiStock -->
+  <rect width="64" height="64" fill="#292524" rx="10"/>
+  <!-- Flèche montante (upload) -->
+  <path d="M32 8 L18 24 L26 24 L26 38 L38 38 L38 24 L46 24 Z"
+        fill="#fbbf24"/>
+  <!-- Base/cylindre stylisé en bas (la base de données) -->
+  <ellipse cx="32" cy="46" rx="18" ry="4"
+           fill="none" stroke="#fbbf24" stroke-width="3"/>
+  <path d="M14 46 L14 54 Q14 58 32 58 Q50 58 50 54 L50 46"
+        fill="none" stroke="#fbbf24" stroke-width="3"/>
+</svg>
