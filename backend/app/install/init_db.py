@@ -120,8 +120,14 @@ def setup_pistock_environment():
         __tablename__ = "bom_line"
         id: int | None = Field(default=None, primary_key=True)
         id_bom: int = Field(foreign_key="bom.id", nullable=False)
-        id_parts: int = Field(foreign_key="parts.id", nullable=False)
-        # Quantite necessaire de cette piece pour assembler une BOM.
+        # Exactement UN des deux champs suivants doit etre renseigne :
+        # - id_parts : ligne pour une piece (cas standard)
+        # - id_subbom : ligne pour une sous-BOM (assemblage hierarchique)
+        # La contrainte est appliquee cote applicatif.
+        id_parts: int | None = Field(default=None, foreign_key="parts.id")
+        id_subbom: int | None = Field(default=None, foreign_key="bom.id")
+        # Quantite necessaire de cette piece ou sous-BOM pour assembler
+        # une unite de la BOM parente.
         quantity: int = Field(default=1)
 
     # 4. Initialize SQLite Database Engine

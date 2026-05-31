@@ -532,7 +532,9 @@ def fetch_boms(project_code: str | None = None):
 
 
 def fetch_bom_detail(bom_id: int):
-    """Detail d'une BOM + ses lignes avec noms de pieces."""
+    """Detail d'une BOM + ses lignes. Chaque ligne a 'line_type' =
+    'part' ou 'subbom' ; selon le cas, soit part_name est rempli,
+    soit subbom_code + subbom_description."""
     import main
     with Session(main.engine) as session:
         bom = session.get(main.Bom, bom_id)
@@ -543,33 +545,56 @@ def fetch_bom_detail(bom_id: int):
             .where(main.BomLine.id_bom == bom_id)
             .order_by(main.BomLine.id)
         ).all()
-        # Pre-charge les parts
-        part_ids = {l.id_parts for l in lines_rows}
+        # Pre-charge parts + sous-BOMs referencees
+        part_ids = {l.id_parts for l in lines_rows
+                     if l.id_parts is not None}
+        subbom_ids = {l.id_subbom for l in lines_rows
+                       if l.id_subbom is not None}
         parts_by_id = {
             p.id: p for p in session.exec(
                 select(main.Parts).where(main.Parts.id.in_(part_ids))
             ).all()
         } if part_ids else {}
+        subboms_by_id = {
+            b.id: b for b in session.exec(
+                select(main.Bom).where(main.Bom.id.in_(subbom_ids))
+            ).all()
+        } if subbom_ids else {}
         project_code = None
         if bom.id_project is not None:
             proj = session.get(main.Project, bom.id_project)
             project_code = proj.code if proj else None
+
+        result_lines = []
+        for l in lines_rows:
+            entry = {"id": l.id, "quantity": l.quantity}
+            if l.id_parts is not None:
+                entry["line_type"] = "part"
+                entry["id_parts"] = l.id_parts
+                entry["part_name"] = (parts_by_id[l.id_parts].part_name
+                                       if l.id_parts in parts_by_id else "?")
+                entry["id_subbom"] = None
+                entry["subbom_code"] = None
+                entry["subbom_description"] = None
+            elif l.id_subbom is not None:
+                sub = subboms_by_id.get(l.id_subbom)
+                entry["line_type"] = "subbom"
+                entry["id_parts"] = None
+                entry["part_name"] = None
+                entry["id_subbom"] = l.id_subbom
+                entry["subbom_code"] = sub.code if sub else "?"
+                entry["subbom_description"] = sub.description if sub else None
+            else:
+                continue  # ligne corrompue, on saute
+            result_lines.append(entry)
+
         return {
             "id": bom.id,
             "code": bom.code,
             "description": bom.description,
             "id_project": bom.id_project,
             "project_code": project_code,
-            "lines": [
-                {
-                    "id": l.id,
-                    "id_parts": l.id_parts,
-                    "part_name": (parts_by_id[l.id_parts].part_name
-                                   if l.id_parts in parts_by_id else "?"),
-                    "quantity": l.quantity,
-                }
-                for l in lines_rows
-            ],
+            "lines": result_lines,
         }
 
 
@@ -610,29 +635,50 @@ def delete_bom_db(bom_id: int):
         return (True, f"BOM '{bom.code}' supprimée.")
 
 
-def add_bom_line_db(bom_id: int, part_id: int, quantity: int):
-    """Ajoute une ligne. Si la part est deja presente, cumule la
-    quantite. Retourne (ok, msg)."""
+def add_bom_line_db(bom_id: int, part_id: int | None,
+                     quantity: int, subbom_id: int | None = None):
+    """Ajoute une ligne BOM. Soit part_id soit subbom_id, pas les deux.
+    Si la cible existe deja dans la BOM, la quantite est cumulee.
+    Pour subbom_id : refus si cycle detecte. Retourne (ok, msg)."""
+    if (part_id is None) == (subbom_id is None):
+        return (False, "Sélectionnez exactement une pièce OU une sous-BOM.")
     if quantity is None or quantity <= 0:
         return (False, "La quantité doit être > 0.")
     import main
     with Session(main.engine) as session:
         if session.get(main.Bom, bom_id) is None:
             return (False, "BOM introuvable.")
-        if session.get(main.Parts, part_id) is None:
-            return (False, "Pièce introuvable.")
-        existing = session.exec(
-            select(main.BomLine)
-            .where(main.BomLine.id_bom == bom_id)
-            .where(main.BomLine.id_parts == part_id)
-        ).first()
+        if part_id is not None:
+            if session.get(main.Parts, part_id) is None:
+                return (False, "Pièce introuvable.")
+            existing = session.exec(
+                select(main.BomLine)
+                .where(main.BomLine.id_bom == bom_id)
+                .where(main.BomLine.id_parts == part_id)
+            ).first()
+            new_line = main.BomLine(id_bom=bom_id, id_parts=part_id,
+                                      quantity=int(quantity))
+        else:
+            sub = session.get(main.Bom, subbom_id)
+            if sub is None:
+                return (False, "Sous-BOM introuvable.")
+            if main._would_create_cycle(session, bom_id, subbom_id):
+                return (False, f"Cycle détecté : '{sub.code}' contient "
+                                f"déjà cette BOM directement ou non.")
+            existing = session.exec(
+                select(main.BomLine)
+                .where(main.BomLine.id_bom == bom_id)
+                .where(main.BomLine.id_subbom == subbom_id)
+            ).first()
+            new_line = main.BomLine(id_bom=bom_id, id_subbom=subbom_id,
+                                      quantity=int(quantity))
+
         if existing:
             existing.quantity += int(quantity)
             session.add(existing)
             session.commit()
             return (True, f"Quantité cumulée à {existing.quantity}.")
-        session.add(main.BomLine(id_bom=bom_id, id_parts=part_id,
-                                  quantity=int(quantity)))
+        session.add(new_line)
         session.commit()
         return (True, "Ligne ajoutée.")
 
@@ -665,7 +711,10 @@ def delete_bom_line_db(line_id: int):
 
 
 def bom_stock_apply(bom_id: int, factor: int, direction: str):
-    """Applique 'factor' fois la BOM sur le stock.
+    """Applique 'factor' fois la BOM sur le stock. Traverse
+    RECURSIVEMENT les sous-BOMs via main._flatten_bom : pour une
+    BOM contenant des sous-BOMs, on calcule d'abord le total par
+    piece feuille, puis on applique sur le stock.
     direction='add' : incremente. direction='sub' : decremente, refus
     atomique si stock insuffisant.
     Retourne (ok, msg, shortages_list)."""
@@ -676,25 +725,29 @@ def bom_stock_apply(bom_id: int, factor: int, direction: str):
         bom = session.get(main.Bom, bom_id)
         if bom is None:
             return (False, "BOM introuvable.", None)
-        lines = session.exec(
-            select(main.BomLine).where(main.BomLine.id_bom == bom_id)
-        ).all()
-        if not lines:
+        # Verifie qu'il y a au moins une ligne (sinon BOM vide)
+        any_line = session.exec(
+            select(main.BomLine).where(main.BomLine.id_bom == bom_id).limit(1)
+        ).first()
+        if any_line is None:
             return (False, "La BOM est vide.", None)
 
+        # Flatten hierarchique -> {part_id: total_qty}
+        try:
+            totals = main._flatten_bom(session, bom_id, factor=factor)
+        except Exception as e:
+            return (False, f"Erreur lors du calcul : {e}", None)
+
         if direction == "sub":
-            # Verification atomique : on calcule TOUS les manques avant
-            # de modifier quoi que ce soit.
+            # Verification atomique sur les pieces feuilles
             shortages = []
-            for line in lines:
+            for part_id, needed in totals.items():
                 stock = session.exec(
-                    select(main.Stock)
-                    .where(main.Stock.id_parts == line.id_parts)
+                    select(main.Stock).where(main.Stock.id_parts == part_id)
                 ).first()
                 current = stock.quantity if stock else 0
-                needed = line.quantity * factor
                 if current < needed:
-                    part = session.get(main.Parts, line.id_parts)
+                    part = session.get(main.Parts, part_id)
                     shortages.append({
                         "part_name": part.part_name if part else "?",
                         "needed": needed,
@@ -704,12 +757,10 @@ def bom_stock_apply(bom_id: int, factor: int, direction: str):
             if shortages:
                 return (False, "Stock insuffisant.", shortages)
 
-        # Application des changements
-        for line in lines:
-            stock = main._get_or_create_stock(session, line.id_parts)
-            delta = line.quantity * factor
-            if direction == "sub":
-                delta = -delta
+        # Application des changements aux pieces feuilles
+        for part_id, qty in totals.items():
+            stock = main._get_or_create_stock(session, part_id)
+            delta = qty if direction == "add" else -qty
             stock.quantity += delta
             session.add(stock)
         session.commit()
@@ -2085,18 +2136,41 @@ def open_bom_stock_dialog(bom_id: int, direction: str, on_done):
         ui.label("Combien de fois ?").classes("text-sm text-gray-600")
         factor_input = ui.number(value=1, min=1, step=1, format="%d") \
             .classes("w-full")
-        # Récap des changements à venir
-        ui.label("Conséquences sur le stock :").classes("text-sm font-medium mt-2")
+        # Récap des changements à venir : on affiche les TOTAUX par
+        # piece feuille apres aplatissement de la hierarchie (recursion
+        # via _flatten_bom). C'est ce qui sera vraiment applique au stock.
+        ui.label("Conséquences sur le stock (pièces feuilles) :") \
+            .classes("text-sm font-medium mt-2")
         recap = ui.column().classes("gap-1")
         def refresh_recap():
             recap.clear()
             f = int(factor_input.value or 1)
             sign = "+" if is_add else "−"
+            # Calcul via le flatten serveur
+            import main
+            with Session(main.engine) as session:
+                try:
+                    totals = main._flatten_bom(session, bom_id, factor=f)
+                    # Pre-charge les noms de pieces pour l'affichage
+                    parts_by_id = {
+                        p.id: p.part_name for p in session.exec(
+                            select(main.Parts)
+                            .where(main.Parts.id.in_(totals.keys()))
+                        ).all()
+                    } if totals else {}
+                except Exception as e:
+                    with recap:
+                        ui.label(f"⚠️  Erreur : {e}") \
+                            .classes("text-xs text-red-600")
+                    return
             with recap:
-                for line in detail["lines"]:
-                    delta = line["quantity"] * f
-                    ui.label(f"  {sign}{delta} × {line['part_name']}") \
-                        .classes("text-xs font-mono text-gray-700")
+                if not totals:
+                    ui.label("(BOM vide)").classes("text-xs text-gray-500")
+                else:
+                    for pid, delta in totals.items():
+                        name = parts_by_id.get(pid, f"#{pid}")
+                        ui.label(f"  {sign}{delta} × {name}") \
+                            .classes("text-xs font-mono text-gray-700")
         factor_input.on("update:model-value", lambda _: refresh_recap())
         refresh_recap()
 
@@ -2164,13 +2238,34 @@ def open_bom_edit_dialog(bom_id: int):
         def render_line_row(line):
             with ui.row().classes("w-full items-center gap-3 no-wrap "
                                     "border-b border-gray-200 py-2"):
-                ui.label(line["part_name"]) \
-                    .classes("text-sm flex-grow")
-                # Quantité éditable
+                # Colonne nom : different selon le type
+                if line["line_type"] == "part":
+                    # Piece : nom simple
+                    ui.label(line["part_name"]) \
+                        .classes("text-sm flex-grow")
+                else:
+                    # Sous-BOM : pastille bleue cliquable + description
+                    sub_id = line["id_subbom"]
+                    def make_open_sub(sid=sub_id):
+                        def handler():
+                            dialog.close()
+                            open_bom_edit_dialog(sid)
+                        return handler
+                    with ui.row().classes("flex-grow items-center gap-2 "
+                                           "cursor-pointer") \
+                            .on("click", make_open_sub()):
+                        ui.label(line["subbom_code"]).classes(
+                            "text-xs font-mono font-bold "
+                            "text-blue-700 bg-blue-100 px-2 py-0.5 rounded")
+                        desc = (line["subbom_description"]
+                                or "(sans description)")
+                        ui.label(desc).classes(
+                            "text-sm text-blue-700 hover:underline")
+
+                # Quantité éditable (commune aux deux types)
                 qty_input = ui.number(value=line["quantity"],
                                        min=1, step=1, format="%d") \
                     .classes("w-24")
-                # Sauvegarde sur perte de focus (.on('blur'))
                 def make_save(lid=line["id"], inp=qty_input):
                     def handler():
                         ok, msg = update_bom_line_db(lid,
@@ -2192,30 +2287,79 @@ def open_bom_edit_dialog(bom_id: int):
                 ui.button(icon="delete", on_click=make_del()) \
                     .props("flat round dense color=negative")
 
-        # --- Formulaire d'ajout en bas -------------------------------
-        with ui.row().classes("w-full items-end gap-2 mt-3 "
-                                "border-t border-gray-200 pt-3"):
-            # Sélecteur de pièce (par id)
-            part_options = {p["id"]: p["part_name"] for p in parts}
-            part_select = ui.select(options=part_options,
-                                     label="Pièce", with_input=True) \
-                .classes("flex-grow")
-            qty_add = ui.number(label="Qté", value=1, min=1, step=1,
-                                 format="%d").classes("w-24")
-            def add_line():
-                pid = part_select.value
-                qty = int(qty_add.value or 1)
-                if pid is None:
-                    ui.notify("Sélectionnez une pièce.", type="warning")
-                    return
-                ok, msg = add_bom_line_db(bom_id, int(pid), qty)
-                ui.notify(msg, type="positive" if ok else "negative")
-                if ok:
+        # --- Formulaire d'ajout en bas : toggle Pièce / Sous-BOM -----
+        # Charge la liste des autres BOMs (toutes sauf la BOM courante,
+        # car on ne peut pas s'auto-référencer)
+        all_boms = fetch_boms()
+        other_boms = [b for b in all_boms if b["id"] != bom_id]
+        bom_options = {
+            b["id"]: f"{b['code']} — {(b['description'] or '')[:30]}"
+            for b in other_boms
+        }
+        part_options = {p["id"]: p["part_name"] for p in parts}
+
+        with ui.column().classes("w-full gap-2 mt-3 "
+                                   "border-t border-gray-200 pt-3"):
+            # Toggle de type de ligne à ajouter
+            line_type_toggle = ui.toggle(
+                {"part": "Pièce", "subbom": "Sous-BOM"},
+                value="part"
+            ).props("dense")
+
+            with ui.row().classes("w-full items-end gap-2"):
+                # Sélecteur pièce (visible par défaut)
+                part_select = ui.select(
+                    options=part_options,
+                    label="Pièce", with_input=True
+                ).classes("flex-grow")
+                # Sélecteur sous-BOM (masqué par défaut)
+                subbom_select = ui.select(
+                    options=bom_options,
+                    label="Sous-BOM", with_input=True
+                ).classes("flex-grow")
+                subbom_select.set_visibility(False)
+
+                qty_add = ui.number(label="Qté", value=1, min=1, step=1,
+                                     format="%d").classes("w-24")
+
+                def on_type_change():
+                    is_part = line_type_toggle.value == "part"
+                    part_select.set_visibility(is_part)
+                    subbom_select.set_visibility(not is_part)
+                    # Reset des valeurs pour éviter la confusion
                     part_select.value = None
-                    qty_add.value = 1
-                    render_lines()
-            ui.button("+ Ajouter", on_click=add_line) \
-                .props("color=primary")
+                    subbom_select.value = None
+                line_type_toggle.on_value_change(on_type_change)
+
+                def add_line():
+                    qty = int(qty_add.value or 1)
+                    if line_type_toggle.value == "part":
+                        pid = part_select.value
+                        if pid is None:
+                            ui.notify("Sélectionnez une pièce.", type="warning")
+                            return
+                        ok, msg = add_bom_line_db(bom_id, int(pid), qty)
+                    else:
+                        sid = subbom_select.value
+                        if sid is None:
+                            if not other_boms:
+                                ui.notify("Aucune autre BOM disponible pour "
+                                          "être ajoutée comme sous-BOM.",
+                                          type="warning")
+                            else:
+                                ui.notify("Sélectionnez une sous-BOM.",
+                                          type="warning")
+                            return
+                        ok, msg = add_bom_line_db(bom_id, None, qty,
+                                                   subbom_id=int(sid))
+                    ui.notify(msg, type="positive" if ok else "negative")
+                    if ok:
+                        part_select.value = None
+                        subbom_select.value = None
+                        qty_add.value = 1
+                        render_lines()
+                ui.button("+ Ajouter", on_click=add_line) \
+                    .props("color=primary")
 
         with ui.row().classes("w-full justify-end mt-3"):
             ui.button(_("Close"), on_click=dialog.close).props("flat")
