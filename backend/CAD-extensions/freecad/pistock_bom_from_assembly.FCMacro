@@ -34,14 +34,20 @@ ou Assembly4, adapter la fonction scan_active_document().
 import json
 import urllib.request
 import urllib.error
+import ssl
 import FreeCAD as App
 from PySide6 import QtWidgets, QtCore
 
 # Configuration : adresse du serveur PiStock
-API_HOST = "http://127.0.0.1:8000"
+# HTTPS avec cert auto-signe local. Voir commentaire sur SSL_CONTEXT.
+API_HOST = "https://127.0.0.1:8000"
 API_PARTS = f"{API_HOST}/api/v1/parts"
 API_PROJECTS = f"{API_HOST}/api/v1/projects"
 API_BOM_FROM_ASSEMBLY = f"{API_HOST}/api/v1/boms/from-assembly"
+
+# Contexte SSL permissif (cert auto-signe local) - voir explication
+# dans les autres macros PiStock.
+SSL_CONTEXT = ssl._create_unverified_context()
 
 # Préférence FreeCAD : utilisée pour la langue (partagée avec les
 # autres macros PiStock).
@@ -147,7 +153,7 @@ def scan_active_document():
 # ======================================================================
 def fetch_json(url, timeout=5):
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with urllib.request.urlopen(url, timeout=timeout, context=SSL_CONTEXT) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception as e:
         App.Console.PrintWarning(f"⚠️  PiStock API ({url}) : {e}\n")
@@ -161,7 +167,7 @@ def post_json(url, payload, timeout=15):
         url, data=data,
         headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=SSL_CONTEXT) as resp:
             return (resp.status, json.loads(resp.read().decode("utf-8")))
     except urllib.error.HTTPError as e:
         try:

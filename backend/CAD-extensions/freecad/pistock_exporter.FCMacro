@@ -26,10 +26,24 @@ import FreeCADGui as Gui
 from PySide6 import QtWidgets, QtCore
 
 # Configuration de l'adresse de votre serveur FastAPI
-API_BASE = "http://127.0.0.1:8000/api/v1"
+import ssl
+
+# Configuration : hote du serveur PiStock
+# IMPORTANT : on parle en HTTPS car le serveur est servi via TLS
+# (certificat auto-signe pour le LAN, Let's Encrypt en prod). Le
+# contexte SSL ci-dessous ignore la verification du certificat, ce
+# qui est ACCEPTABLE en local (127.0.0.1) car il n'y a pas de risque
+# de man-in-the-middle sur sa propre machine, et le cert auto-signe
+# n'est pas verifiable sans configuration explicite.
+# Pour de la prod sur un vrai domaine, remplacer par
+# ssl.create_default_context() (verification stricte).
+API_BASE = "https://127.0.0.1:8000/api/v1"
 API_LIST = f"{API_BASE}/parts"            # GET  : liste des pièces
 API_PROJECTS = f"{API_BASE}/projects"     # GET  : liste des projets
 API_UPLOAD = f"{API_BASE}/parts/upload"   # POST : envoi d'un export
+
+# Contexte SSL permissif (cert auto-signe local)
+SSL_CONTEXT = ssl._create_unverified_context()
 
 # Emplacement où FreeCAD mémorise le dernier auteur saisi.
 # 'App.ParamGet' stocke ça de façon persistante dans la config
@@ -135,7 +149,7 @@ def fetch_existing_parts():
     Format enrichi : id, part_name, id_project, project_code, locked.
     Retourne [] si l'API est injoignable."""
     try:
-        with urllib.request.urlopen(API_LIST, timeout=5) as response:
+        with urllib.request.urlopen(API_LIST, timeout=5, context=SSL_CONTEXT) as response:
             data = response.read().decode("utf-8")
             return json.loads(data)
     except Exception as e:
@@ -149,7 +163,7 @@ def fetch_existing_projects():
     """Récupère la liste des projets pour permettre le filtrage.
     Format : [{id, code, description}, ...]. [] si echec."""
     try:
-        with urllib.request.urlopen(API_PROJECTS, timeout=5) as response:
+        with urllib.request.urlopen(API_PROJECTS, timeout=5, context=SSL_CONTEXT) as response:
             data = response.read().decode("utf-8")
             return json.loads(data)
     except Exception as e:
@@ -563,7 +577,7 @@ def export_and_send_to_pistock():
         req.add_header("Content-Type",
                        f"multipart/form-data; boundary={boundary}")
 
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, context=SSL_CONTEXT) as response:
             res_data = response.read().decode("utf-8")
             App.Console.PrintMessage(
                 f"🎉 [SUCCESS] PiStock mis à jour ! Réponse du serveur : {res_data}\n"
