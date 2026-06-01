@@ -1,0 +1,21 @@
+# ======================================================================
+#  PiStock — configuration serveur (sourcee par les scripts de lancement)
+# ======================================================================
+# Ce fichier vit sur le Pi (le SERVEUR), pas sur le poste FreeCAD.
+# startapp.sh et startapp_newssl.sh le lisent au demarrage : plus aucune
+# valeur en dur dans les scripts.
+#
+# Usage : copiez pistock.conf.example -> pistock.conf puis adaptez.
+# ----------------------------------------------------------------------
+
+# Chemin RACINE du depot PiStock (remplace l'ancien ~/Perso/pistock en dur)
+PISTOCK_DIR="$HOME/Perso/pistock"
+
+# IP (ou nom d'hote) du serveur — sert au certificat TLS (CN + SAN)
+PISTOCK_IP="10.0.0.27"
+
+# Nom DNS optionnel ajoute au certificat (SubjectAltName)
+PISTOCK_DNS="pistock.local"
+
+# Port d'ecoute du serveur
+PISTOCK_PORT="8000"

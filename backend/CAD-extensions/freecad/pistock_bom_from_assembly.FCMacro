@@ -31,6 +31,7 @@ Compatible avec l'atelier Assembly natif FreeCAD 1.x. Pour A2plus
 ou Assembly4, adapter la fonction scan_active_document().
 """
 
+import os
 import json
 import urllib.request
 import urllib.error
@@ -40,7 +41,52 @@ from PySide6 import QtWidgets, QtCore
 
 # Configuration : adresse du serveur PiStock
 # HTTPS avec cert auto-signe local. Voir commentaire sur SSL_CONTEXT.
-API_HOST = "https://127.0.0.1:8000"
+# ----------------------------------------------------------------------
+#  Adresse du serveur PiStock : lue depuis pistock_host.txt
+# ----------------------------------------------------------------------
+# Fichier place A COTE de cette macro (dans le repertoire des macros).
+# Il contient l'IP (ou le nom d'hote) du serveur, par exemple :
+#     192.168.1.50               -> https://192.168.1.50:8000
+#     192.168.1.50:8000          -> https://192.168.1.50:8000
+#     https://pistock.local:8000 -> utilise tel quel
+# Si le fichier est absent ou vide, repli sur 127.0.0.1:8000 (local).
+_DEFAULT_HOST = "127.0.0.1"
+_DEFAULT_PORT = "8000"
+
+
+def _macro_dir():
+    """Repertoire de cette macro (ou chercher pistock_host.txt)."""
+    try:
+        return os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        try:
+            return App.getUserMacroDir(True)
+        except Exception:
+            return os.getcwd()
+
+
+def _read_api_host():
+    """Construit l'URL de base du serveur a partir de pistock_host.txt."""
+    host_file = os.path.join(_macro_dir(), "pistock_host.txt")
+    raw = ""
+    try:
+        with open(host_file, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    raw = line
+                    break
+    except (OSError, IOError):
+        raw = ""
+    if not raw:
+        raw = _DEFAULT_HOST
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return raw.rstrip("/")
+    if ":" not in raw:
+        raw = f"{raw}:{_DEFAULT_PORT}"
+    return f"https://{raw}"
+
+API_HOST = _read_api_host()
 API_PARTS = f"{API_HOST}/api/v1/parts"
 API_PROJECTS = f"{API_HOST}/api/v1/projects"
 API_BOM_FROM_ASSEMBLY = f"{API_HOST}/api/v1/boms/from-assembly"

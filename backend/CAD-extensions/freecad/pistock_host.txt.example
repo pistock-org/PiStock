@@ -1,0 +1,20 @@
+# ======================================================================
+#  PiStock — adresse du serveur (lu par les 3 macros FreeCAD)
+# ======================================================================
+# Mettez ici l'IP (ou le nom d'hote) du serveur PiStock, sur UNE ligne.
+# Les lignes vides et celles commencant par # sont ignorees ; la
+# premiere ligne utile est prise en compte.
+#
+# Exemples acceptes :
+#     192.168.1.50                  ->  https://192.168.1.50:8000
+#     192.168.1.50:8000             ->  https://192.168.1.50:8000
+#     pistock.local                 ->  https://pistock.local:8000
+#     https://pistock.local:8443    ->  utilise tel quel
+#
+# Port par defaut : 8000. Protocole par defaut : https.
+# Si ce fichier est absent ou vide, les macros utilisent 127.0.0.1:8000.
+#
+# Astuce : ce fichier vit sur le POSTE FreeCAD du concepteur (pas sur le
+# Pi). Il est ignore via .gitignore ; copiez ce .example en pistock_host.txt.
+# ----------------------------------------------------------------------
+127.0.0.1
