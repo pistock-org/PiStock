@@ -29,6 +29,7 @@ import os
 import json
 import shutil
 from datetime import datetime, timezone
+import time
 from nicegui import ui, app, events
 from sqlmodel import Session, select
 
@@ -100,6 +101,289 @@ def _register_pwa():
     ''')
 
 
+# ======================================================================
+#  ADMIN — session (login dialogues, garde _ensure_admin)
+# ======================================================================
+# Le mot de passe est en base (table 'admin' cf. main.py). Cote UI on
+# garde un epoch dans app.storage.user["admin_until"]. Une fois expire,
+# le dialogue de login s'ouvre lors de la prochaine action protegee.
+ADMIN_SESSION_SECONDS = 30 * 60  # 30 minutes
+
+
+def _admin_configured() -> bool:
+    import main
+    with Session(main.engine) as session:
+        return session.exec(select(main.Admin)).first() is not None
+
+
+def _session_admin_active() -> bool:
+    try:
+        until = float(app.storage.user.get("admin_until", 0) or 0)
+    except (TypeError, ValueError):
+        until = 0
+    return time.time() < until
+
+
+def _mark_session_admin():
+    app.storage.user["admin_until"] = time.time() + ADMIN_SESSION_SECONDS
+
+
+def _clear_session_admin():
+    app.storage.user.pop("admin_until", None)
+
+
+def _verify_admin_password(password: str) -> bool:
+    import main
+    if not password:
+        return False
+    with Session(main.engine) as session:
+        rec = session.exec(select(main.Admin)).first()
+        if rec is None:
+            return False
+        return main._verify_password(password, rec.salt, rec.password_hash)
+
+
+def _open_admin_setup_dialog(on_done=None):
+    """Premier demarrage : creer le mot de passe admin."""
+    with ui.dialog().props("persistent") as dialog, \
+            ui.card().classes("min-w-[420px]"):
+        ui.label("Configuration initiale — mot de passe admin") \
+            .classes("text-lg font-bold")
+        ui.label("Aucun compte admin n\'est configuré. Choisissez un "
+                  "mot de passe : il sera demandé pour toute "
+                  "suppression et tout déverrouillage.") \
+            .classes("text-sm text-gray-700")
+        p1 = ui.input("Mot de passe (min. 6 caractères)",
+                       password=True, password_toggle_button=True) \
+            .classes("w-full")
+        p2 = ui.input("Confirmer le mot de passe",
+                       password=True, password_toggle_button=True) \
+            .classes("w-full")
+        err = ui.label("").classes("text-sm text-red-600")
+
+        def submit():
+            v1, v2 = p1.value or "", p2.value or ""
+            if len(v1) < 6:
+                err.text = "Le mot de passe doit faire au moins 6 caractères."
+                return
+            if v1 != v2:
+                err.text = "Les deux saisies ne correspondent pas."
+                return
+            import main
+            with Session(main.engine) as session:
+                if session.exec(select(main.Admin)).first() is not None:
+                    err.text = ("Un compte admin existe déjà — "
+                                  "rechargez la page.")
+                    return
+                salt = main._new_salt()
+                session.add(main.Admin(
+                    salt=salt.hex(),
+                    password_hash=main._hash_password(v1, salt),
+                ))
+                session.commit()
+            _mark_session_admin()
+            ui.notify("Compte admin créé.", type="positive")
+            dialog.close()
+            if on_done:
+                on_done()
+
+        with ui.row().classes("w-full justify-end gap-2 mt-1"):
+            ui.button("Créer", on_click=submit).props("color=primary")
+    dialog.open()
+
+
+def _open_admin_login_dialog(on_success=None, on_cancel=None):
+    with ui.dialog() as dialog, ui.card().classes("min-w-[380px]"):
+        ui.label("Authentification admin").classes("text-lg font-bold")
+        ui.label("Saisissez le mot de passe admin pour continuer.") \
+            .classes("text-sm text-gray-700")
+        pwd = ui.input("Mot de passe", password=True,
+                         password_toggle_button=True).classes("w-full")
+        err = ui.label("").classes("text-sm text-red-600")
+
+        def submit():
+            if _verify_admin_password(pwd.value or ""):
+                _mark_session_admin()
+                dialog.close()
+                if on_success:
+                    on_success()
+            else:
+                err.text = "Mot de passe invalide."
+                pwd.value = ""
+
+        pwd.on("keydown.enter", lambda _e: submit())
+        with ui.row().classes("w-full justify-end gap-2 mt-1"):
+            def cancel():
+                dialog.close()
+                if on_cancel:
+                    on_cancel()
+            ui.button("Annuler", on_click=cancel).props("flat")
+            ui.button("Valider", on_click=submit).props("color=primary")
+    dialog.open()
+
+
+def _open_admin_change_password_dialog():
+    with ui.dialog() as dialog, ui.card().classes("min-w-[420px]"):
+        ui.label("Changer le mot de passe admin") \
+            .classes("text-lg font-bold")
+        cur = ui.input("Mot de passe actuel", password=True,
+                         password_toggle_button=True).classes("w-full")
+        n1 = ui.input("Nouveau mot de passe (min. 6 car.)",
+                       password=True, password_toggle_button=True) \
+            .classes("w-full")
+        n2 = ui.input("Confirmer le nouveau", password=True,
+                       password_toggle_button=True).classes("w-full")
+        err = ui.label("").classes("text-sm text-red-600")
+
+        def submit():
+            c, a, b = cur.value or "", n1.value or "", n2.value or ""
+            if not _verify_admin_password(c):
+                err.text = "Mot de passe actuel invalide."
+                return
+            if len(a) < 6:
+                err.text = "Le nouveau doit faire au moins 6 caractères."
+                return
+            if a != b:
+                err.text = "Les deux saisies ne correspondent pas."
+                return
+            import main
+            with Session(main.engine) as session:
+                rec = session.exec(select(main.Admin)).first()
+                if rec is None:
+                    err.text = "Compte admin introuvable."
+                    return
+                new_salt = main._new_salt()
+                rec.salt = new_salt.hex()
+                rec.password_hash = main._hash_password(a, new_salt)
+                from datetime import datetime as _dt, timezone as _tz
+                rec.updated_at = _dt.now(_tz.utc).isoformat()
+                session.add(rec); session.commit()
+            _mark_session_admin()
+            ui.notify("Mot de passe admin renouvelé.", type="positive")
+            dialog.close()
+
+        with ui.row().classes("w-full justify-end gap-2 mt-1"):
+            ui.button("Annuler", on_click=dialog.close).props("flat")
+            ui.button("Valider", on_click=submit).props("color=primary")
+    dialog.open()
+
+
+def _ensure_admin(on_success, on_cancel=None):
+    """Garde universelle : exige une session admin.
+    - Admin actif -> appelle on_success() immediatement.
+    - Pas d'admin configure -> ouvre le setup ; au succes -> on_success.
+    - Admin configure mais session expiree -> ouvre le login."""
+    if _session_admin_active():
+        on_success()
+        return
+    if not _admin_configured():
+        _open_admin_setup_dialog(on_done=on_success)
+        return
+    _open_admin_login_dialog(on_success=on_success, on_cancel=on_cancel)
+
+
+def delete_project_db(project_id: int):
+    """Supprime un projet (UI in-process). Refuse (renvoie blocking)
+    si des pieces ou des BOMs y sont encore rattachees. Necessite que
+    la session soit admin (defense en profondeur).
+
+    Retourne (ok: bool, msg: str, blocking: dict|None).
+    Si blocking n'est pas None, il contient {"parts":[...], "boms":[...]}.
+    """
+    if not _session_admin_active():
+        return False, "Session admin requise.", None
+    import main
+    with Session(main.engine) as session:
+        project = session.get(main.Project, project_id)
+        if project is None:
+            return False, "Projet introuvable.", None
+        parts_left = session.exec(
+            select(main.Parts).where(main.Parts.id_project == project_id)
+        ).all()
+        boms_left = session.exec(
+            select(main.Bom).where(main.Bom.id_project == project_id)
+        ).all()
+        if parts_left or boms_left:
+            return False, (
+                f"Impossible : {len(parts_left)} pièce(s) et "
+                f"{len(boms_left)} BOM(s) rattachées au projet "
+                f"« {project.code} »."
+            ), {
+                "parts": [
+                    {"id": p.id, "part_name": p.part_name}
+                    for p in parts_left
+                ],
+                "boms": [
+                    {"id": b.id, "code": b.code,
+                     "description": b.description}
+                    for b in boms_left
+                ],
+            }
+        code = project.code
+        session.delete(project); session.commit()
+        return True, f"Projet « {code} » supprimé.", None
+
+
+def confirm_delete_project(project: dict, on_done):
+    """Dialogue de confirmation pour supprimer un projet, derriere
+    la garde admin. Au refus pour cause de non-vide, affiche la liste."""
+    def really_delete():
+        with ui.dialog() as dialog, ui.card().classes("min-w-[440px]"):
+            ui.label("Confirmer la suppression du projet") \
+                .classes("text-lg font-bold")
+            ui.label(f"Supprimer définitivement le projet "
+                      f"« {project['code']} » ?") \
+                .classes("text-sm")
+            ui.label("Un projet ne peut être supprimé que s\'il ne "
+                      "contient plus aucune pièce et aucune BOM.") \
+                .classes("text-sm text-gray-600")
+            error_area = ui.column().classes("w-full gap-1")
+
+            def do_delete():
+                error_area.clear()
+                ok, msg, blocking = delete_project_db(project["id"])
+                if ok:
+                    ui.notify(msg, type="positive")
+                    dialog.close()
+                    on_done()
+                    return
+                if blocking:
+                    with error_area:
+                        with ui.card().classes(
+                                "w-full bg-red-50 border-l-4 "
+                                "border-red-400 p-3 mt-2"):
+                            ui.label(msg).classes(
+                                "text-sm font-medium text-red-700")
+                            if blocking["parts"]:
+                                ui.label("Pièces rattachées :") \
+                                    .classes("text-xs text-red-600 mt-1")
+                                for p in blocking["parts"][:8]:
+                                    ui.label(f"  • {p['part_name']}") \
+                                        .classes("text-xs font-mono "
+                                                  "text-red-600")
+                                if len(blocking["parts"]) > 8:
+                                    ui.label(f"  … et "
+                                              f"{len(blocking['parts'])-8} "
+                                              f"autres") \
+                                        .classes("text-xs text-red-600")
+                            if blocking["boms"]:
+                                ui.label("BOMs rattachées :") \
+                                    .classes("text-xs text-red-600 mt-1")
+                                for b in blocking["boms"][:8]:
+                                    ui.label(f"  • {b['code']}") \
+                                        .classes("text-xs font-mono "
+                                                  "text-red-600")
+                else:
+                    ui.notify(msg, type="negative")
+
+            with ui.row().classes("w-full justify-end gap-2 mt-2"):
+                ui.button("Annuler", on_click=dialog.close).props("flat")
+                ui.button("Supprimer", on_click=do_delete) \
+                    .props("color=negative")
+        dialog.open()
+    _ensure_admin(really_delete)
+
+
 def render_app_header(title_key: str, show_home: bool = False):
     """En-tete commun aux pages : titre a gauche, sélecteur de langue
     et lien vers le code source a droite (obligation AGPLv3).
@@ -126,6 +410,36 @@ def render_app_header(title_key: str, show_home: bool = False):
                        on_click=lambda: ui.navigate.reload()) \
                 .props("flat round dense color=white") \
                 .tooltip("Actualiser la page")
+
+            # --- Indicateur admin ---------------------------------
+            # 3 etats visuels :
+            #   - admin actif         -> icone verte + menu (change mdp, logout)
+            #   - admin configure inactif -> icone grise, ouvre le login
+            #   - aucun admin configure  -> rien (le setup s'ouvre tout seul)
+            if _admin_configured():
+                if _session_admin_active():
+                    with ui.button(icon="admin_panel_settings") \
+                            .props("flat round dense color=green-3") \
+                            .tooltip("Session admin active"):
+                        with ui.menu():
+                            ui.menu_item(
+                                "Changer le mot de passe",
+                                on_click=_open_admin_change_password_dialog)
+                            ui.menu_item(
+                                "Déconnecter l\'admin",
+                                on_click=lambda: (
+                                    _clear_session_admin(),
+                                    ui.notify("Session admin terminée.",
+                                               type="info"),
+                                    ui.navigate.reload(),
+                                ))
+                else:
+                    ui.button(
+                        icon="admin_panel_settings",
+                        on_click=lambda: _open_admin_login_dialog(
+                            on_success=lambda: ui.navigate.reload()),
+                    ).props("flat round dense color=grey-5") \
+                     .tooltip("Se connecter comme admin")
 
             # --- Selecteur de langue --------------------------------
             # Toggle EN/FR. Au changement : on stocke la preference
@@ -275,12 +589,16 @@ def set_part_status_db(part_id: int, new_status: str):
 
 
 def toggle_part_lock_db(part_id: int):
-    """Inverse le verrou. Retourne (ok, msg, new_locked)."""
+    """Inverse le verrou. Retourne (ok, msg, new_locked).
+    Le DEVERROUILLAGE exige une session admin ; verrouiller reste libre."""
     engine, Parts_cls, _, _, _ = _db()
     with Session(engine) as session:
         part = session.get(Parts_cls, part_id)
         if part is None:
             return (False, "Pièce introuvable.", None)
+        # Le DEVERROUILLAGE exige une session admin ; verrouiller reste libre.
+        if part.locked and not _session_admin_active():
+            return False, "Session admin requise pour déverrouiller.", part.locked
         part.locked = not part.locked
         session.add(part)
         session.commit()
@@ -392,6 +710,9 @@ def fetch_revisions(part_id: int):
 
 
 def delete_revision_db(plm_id: int):
+    # Garde admin (defense en profondeur — l'UI gate aussi).
+    if not _session_admin_active():
+        return False, "Session admin requise."
     """Supprime une revision (ligne + fichiers disque). Verifie le
     verrou de la piece parente. Retourne (ok, msg)."""
     engine, Parts_cls, PLM_cls, _, DATA_DIR = _db()
@@ -636,7 +957,9 @@ def create_bom_db(description: str, id_project: int | None):
 
 
 def delete_bom_db(bom_id: int):
-    """Supprime une BOM et ses lignes (cascade manuelle)."""
+    if not _session_admin_active():
+        return False, "Session admin requise."
+    """Supprime une BOM et ses lignes (necessite session admin)."""
     import main
     with Session(main.engine) as session:
         bom = session.get(main.Bom, bom_id)
@@ -653,7 +976,11 @@ def delete_bom_db(bom_id: int):
 
 
 def delete_part_db(part_id: int):
-    """Supprime DEFINITIVEMENT une piece de la base avec cascade
+    if not _session_admin_active():
+        return False, "Session admin requise.", None
+    """Supprime DEFINITIVEMENT une piece (necessite session admin).
+
+    Supprime aussi en cascade
     sur PLM, Stock et fichiers physiques. Refus si la piece est
     referencee dans une BOM.
 
@@ -866,6 +1193,9 @@ def dashboard_page():
     # quoi que ce soit (les premiers appels a _() en dependent).
     _apply_user_lang()
     _register_pwa()
+    # Premier demarrage : pas encore de mot de passe admin -> setup
+    if not _admin_configured():
+        _open_admin_setup_dialog()
     # Titre de l'onglet navigateur (visible dans la barre + historique)
     ui.page_title(_("PiStock — Catalog"))
 
@@ -1326,6 +1656,22 @@ def dashboard_page():
                                     ui.label("(aucune description)") \
                                         .classes("text-sm text-gray-400 "
                                                   "italic flex-grow")
+                                # Bouton suppression (admin + projet vide)
+                                def _make_del(p=proj):
+                                    def h():
+                                        confirm_delete_project(
+                                            p,
+                                            on_done=lambda: (
+                                                refresh_projects_list(),
+                                                refresh_project_filter(),
+                                            ))
+                                    return h
+                                ui.button(
+                                    icon="delete",
+                                    on_click=_make_del()) \
+                                    .props("flat round dense color=grey-6") \
+                                    .classes("flex-shrink-0") \
+                                    .tooltip("Supprimer ce projet")
 
             def show_creation_form():
                 desc_input.value = ""
@@ -1389,14 +1735,20 @@ def render_part_row(part: dict, on_change):
             lock_icon = "lock" if locked else "lock_open"
             lock_color = "text-red-600" if locked else "text-gray-400"
 
-            def make_toggle_lock(pid=part_id):
-                def handler():
+            def make_toggle_lock(pid=part_id, is_locked=locked):
+                def do_toggle():
                     ok, msg, _ = toggle_part_lock_db(pid)
                     if ok:
                         ui.notify(msg, type="info")
                         on_change()
                     else:
                         ui.notify(msg, type="negative")
+                def handler():
+                    # Verrouiller : libre. Deverrouiller : admin requis.
+                    if is_locked:
+                        _ensure_admin(do_toggle)
+                    else:
+                        do_toggle()
                 return handler
 
             ui.button(icon=lock_icon, on_click=make_toggle_lock()) \
@@ -1788,6 +2140,9 @@ def render_revision_row(rev: dict, on_change, on_view):
 
 
 def confirm_delete_revision(plm_id: int, version: str, on_change):
+    return _ensure_admin(lambda: _confirm_delete_revision_inner(plm_id, version, on_change))
+
+def _confirm_delete_revision_inner(plm_id: int, version: str, on_change):
     """Petit dialogue de confirmation avant suppression destructive."""
     with ui.dialog() as dialog, ui.card():
         ui.label(f"Supprimer la révision « {version} » ?") \
@@ -1877,6 +2232,10 @@ def open_part_options_dialog(part: dict, on_change):
 
 
 def confirm_delete_part(part: dict, on_change):
+    # Garde admin : on ouvre le vrai dialogue seulement apres login.
+    return _ensure_admin(lambda: _confirm_delete_part_inner(part, on_change))
+
+def _confirm_delete_part_inner(part: dict, on_change):
     """Dialogue de confirmation finale pour la suppression d'une piece.
     Affiche le nom en gras et un avertissement. Au confirmation :
     appelle delete_part_db ; si refus pour cause de BOMs, affiche
@@ -2317,6 +2676,9 @@ def open_boms_dialog():
 
 
 def confirm_delete_bom(bom_id: int, code: str, on_done):
+    return _ensure_admin(lambda: _confirm_delete_bom_inner(bom_id, code, on_done))
+
+def _confirm_delete_bom_inner(bom_id: int, code: str, on_done):
     """Dialogue de confirmation pour la suppression d'une BOM."""
     with ui.dialog() as d, ui.card():
         ui.label(f"Supprimer la BOM « {code} » ?") \

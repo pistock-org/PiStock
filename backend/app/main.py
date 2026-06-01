@@ -15,11 +15,14 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
+import hashlib
+import secrets
 import logging
 import traceback
 from datetime import datetime, timezone
 from shutil import copyfileobj
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import (FastAPI, UploadFile, File, Form, HTTPException,
+                      Header, Depends)
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import SQLModel, Field, Session, create_engine, select
 from pydantic import BaseModel
@@ -116,6 +119,23 @@ class BomLine(SQLModel, table=True):
     id_parts: int | None = Field(default=None, foreign_key="parts.id")
     id_subbom: int | None = Field(default=None, foreign_key="bom.id")
     quantity: int = Field(default=1)
+
+
+# Compte admin (singleton : on n'utilise jamais qu'une seule ligne,
+# id=1). Sert aux operations destructives (suppressions, deverrouillage).
+# Voir endpoints /api/v1/admin/* et helpers _check_admin_password /
+# _require_admin plus bas.
+class Admin(SQLModel, table=True):
+    __tablename__ = "admin"
+    id: int | None = Field(default=None, primary_key=True)
+    salt: str            # 16 octets aleatoires, en hex
+    password_hash: str   # PBKDF2-HMAC-SHA256, 200_000 iter, en hex
+    created_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+    updated_at: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
 
 # ----------------------------------------------------------------------
@@ -336,6 +356,75 @@ def _get_current_plm(session: Session, part_id: int):
     ).first()
 
 
+# ----------------------------------------------------------------------
+#  AUTHENTIFICATION ADMIN (mot de passe singleton)
+# ----------------------------------------------------------------------
+# Le compte admin est unique. Mot de passe stocke en PBKDF2-HMAC-SHA256
+# (200_000 iter, sel aleatoire 16 octets). Uniquement stdlib, aucune
+# dependance ajoutee.
+#
+#   - Cree au premier demarrage via POST /api/v1/admin/setup
+#     (refuse si un admin existe deja).
+#   - Renouvelable via POST /api/v1/admin/change-password (necessite
+#     l'ancien mot de passe).
+#
+# Les endpoints destructifs (DELETE *) et le DEVERROUILLAGE d'une
+# piece exigent le header HTTP `X-Admin-Password`. Suffisant en LAN
+# avec HTTPS (cert auto-signe) ; pour de l'expose internet, prevoir
+# un vrai jeton de session.
+PBKDF2_ITER = 200_000
+
+
+def _new_salt() -> bytes:
+    return secrets.token_bytes(16)
+
+
+def _hash_password(password: str, salt: bytes) -> str:
+    """PBKDF2-HMAC-SHA256, retourne le hash en hex."""
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
+                                 salt, PBKDF2_ITER).hex()
+
+
+def _verify_password(password: str, salt_hex: str, hash_hex: str) -> bool:
+    """Comparaison en temps constant (anti timing-attack)."""
+    expected = _hash_password(password, bytes.fromhex(salt_hex))
+    return secrets.compare_digest(expected, hash_hex)
+
+
+def _get_admin(session: Session):
+    return session.exec(select(Admin)).first()
+
+
+def _check_admin_password(password):
+    """Valide un mot de passe admin. Leve 401/403/503 sinon.
+    Utile en code (verifications conditionnelles, ex. deverrouillage).
+    Pour proteger un endpoint entier, utiliser plutot _require_admin
+    en Depends."""
+    if not password:
+        raise HTTPException(
+            status_code=401,
+            detail=("Authentification admin requise "
+                     "(header X-Admin-Password).")
+        )
+    with Session(engine) as session:
+        admin = _get_admin(session)
+        if admin is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Compte admin non configure (POST /admin/setup)."
+            )
+        if not _verify_password(password, admin.salt, admin.password_hash):
+            raise HTTPException(status_code=403,
+                                detail="Mot de passe admin invalide.")
+
+
+def _require_admin(
+    x_admin_password: str | None = Header(default=None),
+) -> None:
+    """Dependance FastAPI : impose le header X-Admin-Password valide."""
+    _check_admin_password(x_admin_password)
+
+
 @app.on_event("startup")
 def on_startup():
     SQLModel.metadata.create_all(engine)
@@ -377,6 +466,132 @@ def create_project(description: str = Form(default="")):
             "code": project.code,
             "description": project.description,
         }
+
+
+# ----------------------------------------------------------------------
+#  ENDPOINTS API : ADMIN (singleton, mot de passe)
+# ----------------------------------------------------------------------
+@app.get("/api/v1/admin/status")
+def admin_status():
+    """Indique si un compte admin existe. Utilise par l'UI pour
+    declencher le dialogue de setup au premier lancement."""
+    with Session(engine) as session:
+        return {"configured": _get_admin(session) is not None}
+
+
+@app.post("/api/v1/admin/setup")
+def admin_setup(password: str = Form(...)):
+    """Cree le compte admin au PREMIER lancement uniquement.
+    409 si un admin existe deja (utiliser change-password)."""
+    if len(password) < 6:
+        raise HTTPException(
+            status_code=400,
+            detail="Le mot de passe doit faire au moins 6 caracteres."
+        )
+    with Session(engine) as session:
+        if _get_admin(session) is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=("Un compte admin existe deja. "
+                         "Utilisez /admin/change-password.")
+            )
+        salt = _new_salt()
+        admin = Admin(salt=salt.hex(),
+                      password_hash=_hash_password(password, salt))
+        session.add(admin); session.commit()
+        logger.info("Compte admin cree.")
+        return {"status": "success"}
+
+
+@app.post("/api/v1/admin/verify")
+def admin_verify(password: str = Form(...)):
+    """Verifie un mot de passe admin. Utilise par l'UI pour le login."""
+    _check_admin_password(password)   # leve 401/403/503 si invalide
+    return {"status": "success"}
+
+
+@app.post("/api/v1/admin/change-password")
+def admin_change_password(
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+):
+    """Renouvelle le mot de passe admin. Necessite l'ancien."""
+    if len(new_password) < 6:
+        raise HTTPException(
+            status_code=400,
+            detail=("Le nouveau mot de passe doit faire au moins "
+                     "6 caracteres.")
+        )
+    with Session(engine) as session:
+        admin = _get_admin(session)
+        if admin is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Compte admin non configure (POST /admin/setup)."
+            )
+        if not _verify_password(current_password, admin.salt,
+                                 admin.password_hash):
+            raise HTTPException(status_code=403,
+                                detail="Mot de passe actuel invalide.")
+        new_salt = _new_salt()
+        admin.salt = new_salt.hex()
+        admin.password_hash = _hash_password(new_password, new_salt)
+        admin.updated_at = datetime.now(timezone.utc).isoformat()
+        session.add(admin); session.commit()
+        logger.info("Mot de passe admin renouvele.")
+        return {"status": "success"}
+
+
+# ----------------------------------------------------------------------
+#  ENDPOINT API : SUPPRESSION DE PROJET (admin requis)
+# ----------------------------------------------------------------------
+@app.delete("/api/v1/projects/{project_id}")
+def delete_project(
+    project_id: int,
+    _admin: None = Depends(_require_admin),
+):
+    """Supprime un projet. REFUSE (409) si des pieces ou des BOMs
+    y sont encore rattachees (meme principe que les pieces dans
+    les BOMs). Necessite le header X-Admin-Password."""
+    with Session(engine) as session:
+        project = session.get(Project, project_id)
+        if project is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Projet id={project_id} introuvable."
+            )
+        parts_left = session.exec(
+            select(Parts).where(Parts.id_project == project_id)
+        ).all()
+        boms_left = session.exec(
+            select(Bom).where(Bom.id_project == project_id)
+        ).all()
+        if parts_left or boms_left:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": (
+                        f"Impossible de supprimer le projet "
+                        f"'{project.code}' : "
+                        f"{len(parts_left)} pieces(s) et "
+                        f"{len(boms_left)} BOM(s) y sont encore "
+                        f"rattachees."
+                    ),
+                    "parts": [
+                        {"id": p.id, "part_name": p.part_name}
+                        for p in parts_left
+                    ],
+                    "boms": [
+                        {"id": b.id, "code": b.code,
+                         "description": b.description}
+                        for b in boms_left
+                    ],
+                },
+            )
+        code = project.code
+        session.delete(project); session.commit()
+        logger.info(f"Projet '{code}' (id={project_id}) supprime.")
+        return {"status": "success", "deleted_id": project_id}
 
 
 # ======================================================================
@@ -516,7 +731,8 @@ def create_bom(description: str = Form(default=""),
 
 
 @app.delete("/api/v1/boms/{bom_id}")
-def delete_bom(bom_id: int):
+def delete_bom(bom_id: int,
+               _admin: None = Depends(_require_admin)):
     """Supprime une BOM ET toutes ses lignes (suppression en cascade
     geree manuellement puisque SQLite n'enforce pas les FK par defaut)."""
     with Session(engine) as session:
@@ -1118,7 +1334,11 @@ def set_part_status(part_id: int, new_status: str = Form(...)):
 
 
 @app.post("/api/v1/parts/{part_id}/lock")
-def toggle_part_lock(part_id: int, locked: bool = Form(...)):
+def toggle_part_lock(
+    part_id: int,
+    locked: bool = Form(...),
+    x_admin_password: str | None = Header(default=None),
+):
     """Toggle le verrou d'une piece. Pas de protection vs lui-meme :
     le verrou peut toujours etre modifie (sinon il serait impossible
     de le retirer une fois pose)."""
@@ -1126,7 +1346,12 @@ def toggle_part_lock(part_id: int, locked: bool = Form(...)):
         part = session.get(Parts, part_id)
         if part is None:
             raise HTTPException(status_code=404, detail="Pièce introuvable.")
-        part.locked = bool(locked)
+        new_locked = bool(locked)
+        # Le DEVERROUILLAGE exige une auth admin ; le verrouillage
+        # reste libre (lock-down rapide en cas de besoin).
+        if part.locked and not new_locked:
+            _check_admin_password(x_admin_password)
+        part.locked = new_locked
         session.add(part)
         session.commit()
         return {"status": "success", "locked": part.locked}
@@ -1393,7 +1618,8 @@ def _delete_file_if_exists(rel_path: str | None):
 
 
 @app.delete("/api/v1/plm/{plm_id}")
-def delete_plm_revision(plm_id: int):
+def delete_plm_revision(plm_id: int,
+                         _admin: None = Depends(_require_admin)):
     """Supprime une revision PLM : la ligne en base ET les fichiers
     associes sur disque (.FCStd, .glb, .png). Refuse si la piece
     est verrouillee."""
@@ -1419,7 +1645,8 @@ def delete_plm_revision(plm_id: int):
 
 
 @app.delete("/api/v1/parts/{part_id}")
-def delete_part(part_id: int):
+def delete_part(part_id: int,
+                _admin: None = Depends(_require_admin)):
     """Supprime DEFINITIVEMENT une piece de la base :
     - Refus (409) si la piece est referencee dans une ou plusieurs BOMs
       (avec la liste des BOMs concernees dans le detail)

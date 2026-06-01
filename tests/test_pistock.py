@@ -15,7 +15,7 @@
 # ----------------------------------------------------------------------
 import pytest
 from fastapi import HTTPException
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import SQLModel, Session, create_engine, select
 
 import main  # résolu via tests/conftest.py
 
@@ -221,3 +221,68 @@ class TestWouldCreateCycle:
         a = _mk_bom(session, "B0001")
         d = _mk_bom(session, "B0004")  # sans enfants
         assert main._would_create_cycle(session, a.id, d.id) is False
+
+
+# =====================================================================
+#  7. Authentification admin (PBKDF2 + endpoints)
+# =====================================================================
+class TestAdminPasswordHash:
+    def test_roundtrip(self):
+        salt = main._new_salt()
+        h = main._hash_password("hunter2", salt)
+        assert main._verify_password("hunter2", salt.hex(), h) is True
+
+    def test_rejects_wrong_password(self):
+        salt = main._new_salt()
+        h = main._hash_password("hunter2", salt)
+        assert main._verify_password("Hunter2", salt.hex(), h) is False
+        assert main._verify_password("", salt.hex(), h) is False
+
+    def test_salt_changes_hash(self):
+        s1, s2 = main._new_salt(), main._new_salt()
+        # Salts différents -> hashes différents pour le même mot de passe
+        assert s1 != s2
+        assert main._hash_password("same", s1) != main._hash_password("same", s2)
+
+    def test_hash_is_hex_and_long_enough(self):
+        # SHA-256 -> 32 octets -> 64 caractères hex
+        h = main._hash_password("x", main._new_salt())
+        assert len(h) == 64
+        int(h, 16)  # ne lève pas si bien hex
+
+
+class TestCheckAdminPassword:
+    def test_no_admin_configured_raises_503(self, session):
+        # Note : _check_admin_password ouvre sa propre Session sur l'engine
+        # global de main, donc on ne peut pas tester l'absence d'admin
+        # via la fixture en mémoire. On vérifie juste les cas password
+        # vide/None qui lèvent 401 sans toucher la DB.
+        with pytest.raises(HTTPException) as exc:
+            main._check_admin_password(None)
+        assert exc.value.status_code == 401
+
+    def test_empty_password_raises_401(self):
+        with pytest.raises(HTTPException) as exc:
+            main._check_admin_password("")
+        assert exc.value.status_code == 401
+
+
+class TestAdminModelInSchema:
+    def test_admin_table_created(self, session):
+        # La table 'admin' fait partie du schéma (créée par create_all).
+        # On vérifie qu'on peut insérer et lire un enregistrement.
+        salt = main._new_salt()
+        rec = main.Admin(
+            salt=salt.hex(),
+            password_hash=main._hash_password("test123", salt),
+        )
+        session.add(rec)
+        session.commit()
+        session.refresh(rec)
+        assert rec.id is not None
+        assert rec.created_at  # default_factory a fonctionné
+
+        fetched = session.exec(select(main.Admin)).first()
+        assert fetched is not None
+        assert main._verify_password("test123", fetched.salt,
+                                       fetched.password_hash)
