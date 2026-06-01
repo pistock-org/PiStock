@@ -14,22 +14,23 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Authentification admin cote UI : etat de session (stocke dans
-app.storage.user), dialogues (setup, login, changement de mot de
-passe) et garde universelle _ensure_admin. Le mot de passe vit en
-base (table admin) ; on accede a main de facon paresseuse.
+"""Admin authentication on the UI side: session state (stored in
+app.storage.user), dialogs (setup, login, password change) and the
+universal guard _ensure_admin. The password lives in the database
+(admin table); main is accessed via a lazy import.
 """
 import time
 from nicegui import ui, app
 from sqlmodel import Session, select
+from i18n import _
 
 
 # ======================================================================
-#  ADMIN — session (login dialogues, garde _ensure_admin)
+#  ADMIN — session (login dialogs, _ensure_admin guard)
 # ======================================================================
-# Le mot de passe est en base (table 'admin' cf. main.py). Cote UI on
-# garde un epoch dans app.storage.user["admin_until"]. Une fois expire,
-# le dialogue de login s'ouvre lors de la prochaine action protegee.
+# The password is in the database (table 'admin', see main.py). On the
+# UI side we keep an epoch in app.storage.user["admin_until"]. Once it
+# expires, the login dialog opens on the next protected action.
 ADMIN_SESSION_SECONDS = 30 * 60  # 30 minutes
 
 
@@ -67,19 +68,19 @@ def _verify_admin_password(password: str) -> bool:
 
 
 def _open_admin_setup_dialog(on_done=None):
-    """Premier demarrage : creer le mot de passe admin."""
+    """First startup: create the admin password."""
     with ui.dialog().props("persistent") as dialog, \
             ui.card().classes("min-w-[420px]"):
-        ui.label("Configuration initiale — mot de passe admin") \
+        ui.label(_("Initial setup — admin password")) \
             .classes("text-lg font-bold")
-        ui.label("Aucun compte admin n\'est configuré. Choisissez un "
-                  "mot de passe : il sera demandé pour toute "
-                  "suppression et tout déverrouillage.") \
+        ui.label(_("No admin account is configured. Choose a password: "
+                   "it will be required for any deletion and any "
+                   "unlock.")) \
             .classes("text-sm text-gray-700")
-        p1 = ui.input("Mot de passe (min. 6 caractères)",
+        p1 = ui.input(_("Password (min. 6 characters)"),
                        password=True, password_toggle_button=True) \
             .classes("w-full")
-        p2 = ui.input("Confirmer le mot de passe",
+        p2 = ui.input(_("Confirm password"),
                        password=True, password_toggle_button=True) \
             .classes("w-full")
         err = ui.label("").classes("text-sm text-red-600")
@@ -87,16 +88,16 @@ def _open_admin_setup_dialog(on_done=None):
         def submit():
             v1, v2 = p1.value or "", p2.value or ""
             if len(v1) < 6:
-                err.text = "Le mot de passe doit faire au moins 6 caractères."
+                err.text = _("Password must be at least 6 characters.")
                 return
             if v1 != v2:
-                err.text = "Les deux saisies ne correspondent pas."
+                err.text = _("The two entries do not match.")
                 return
             import main
             with Session(main.engine) as session:
                 if session.exec(select(main.Admin)).first() is not None:
-                    err.text = ("Un compte admin existe déjà — "
-                                  "rechargez la page.")
+                    err.text = _("An admin account already exists — "
+                                 "reload the page.")
                     return
                 salt = main._new_salt()
                 session.add(main.Admin(
@@ -105,22 +106,22 @@ def _open_admin_setup_dialog(on_done=None):
                 ))
                 session.commit()
             _mark_session_admin()
-            ui.notify("Compte admin créé.", type="positive")
+            ui.notify(_("Admin account created."), type="positive")
             dialog.close()
             if on_done:
                 on_done()
 
         with ui.row().classes("w-full justify-end gap-2 mt-1"):
-            ui.button("Créer", on_click=submit).props("color=primary")
+            ui.button(_("Create"), on_click=submit).props("color=primary")
     dialog.open()
 
 
 def _open_admin_login_dialog(on_success=None, on_cancel=None):
     with ui.dialog() as dialog, ui.card().classes("min-w-[380px]"):
-        ui.label("Authentification admin").classes("text-lg font-bold")
-        ui.label("Saisissez le mot de passe admin pour continuer.") \
+        ui.label(_("Admin authentication")).classes("text-lg font-bold")
+        ui.label(_("Enter the admin password to continue.")) \
             .classes("text-sm text-gray-700")
-        pwd = ui.input("Mot de passe", password=True,
+        pwd = ui.input(_("Password"), password=True,
                          password_toggle_button=True).classes("w-full")
         err = ui.label("").classes("text-sm text-red-600")
 
@@ -131,7 +132,7 @@ def _open_admin_login_dialog(on_success=None, on_cancel=None):
                 if on_success:
                     on_success()
             else:
-                err.text = "Mot de passe invalide."
+                err.text = _("Invalid password.")
                 pwd.value = ""
 
         pwd.on("keydown.enter", lambda _e: submit())
@@ -140,40 +141,40 @@ def _open_admin_login_dialog(on_success=None, on_cancel=None):
                 dialog.close()
                 if on_cancel:
                     on_cancel()
-            ui.button("Annuler", on_click=cancel).props("flat")
-            ui.button("Valider", on_click=submit).props("color=primary")
+            ui.button(_("Cancel"), on_click=cancel).props("flat")
+            ui.button(_("Confirm"), on_click=submit).props("color=primary")
     dialog.open()
 
 
 def _open_admin_change_password_dialog():
     with ui.dialog() as dialog, ui.card().classes("min-w-[420px]"):
-        ui.label("Changer le mot de passe admin") \
+        ui.label(_("Change admin password")) \
             .classes("text-lg font-bold")
-        cur = ui.input("Mot de passe actuel", password=True,
+        cur = ui.input(_("Current password"), password=True,
                          password_toggle_button=True).classes("w-full")
-        n1 = ui.input("Nouveau mot de passe (min. 6 car.)",
+        n1 = ui.input(_("New password (min. 6 chars)"),
                        password=True, password_toggle_button=True) \
             .classes("w-full")
-        n2 = ui.input("Confirmer le nouveau", password=True,
+        n2 = ui.input(_("Confirm new password"), password=True,
                        password_toggle_button=True).classes("w-full")
         err = ui.label("").classes("text-sm text-red-600")
 
         def submit():
             c, a, b = cur.value or "", n1.value or "", n2.value or ""
             if not _verify_admin_password(c):
-                err.text = "Mot de passe actuel invalide."
+                err.text = _("Current password is invalid.")
                 return
             if len(a) < 6:
-                err.text = "Le nouveau doit faire au moins 6 caractères."
+                err.text = _("The new password must be at least 6 characters.")
                 return
             if a != b:
-                err.text = "Les deux saisies ne correspondent pas."
+                err.text = _("The two entries do not match.")
                 return
             import main
             with Session(main.engine) as session:
                 rec = session.exec(select(main.Admin)).first()
                 if rec is None:
-                    err.text = "Compte admin introuvable."
+                    err.text = _("Admin account not found.")
                     return
                 new_salt = main._new_salt()
                 rec.salt = new_salt.hex()
@@ -182,20 +183,20 @@ def _open_admin_change_password_dialog():
                 rec.updated_at = _dt.now(_tz.utc).isoformat()
                 session.add(rec); session.commit()
             _mark_session_admin()
-            ui.notify("Mot de passe admin renouvelé.", type="positive")
+            ui.notify(_("Admin password updated."), type="positive")
             dialog.close()
 
         with ui.row().classes("w-full justify-end gap-2 mt-1"):
-            ui.button("Annuler", on_click=dialog.close).props("flat")
-            ui.button("Valider", on_click=submit).props("color=primary")
+            ui.button(_("Cancel"), on_click=dialog.close).props("flat")
+            ui.button(_("Confirm"), on_click=submit).props("color=primary")
     dialog.open()
 
 
 def _ensure_admin(on_success, on_cancel=None):
-    """Garde universelle : exige une session admin.
-    - Admin actif -> appelle on_success() immediatement.
-    - Pas d'admin configure -> ouvre le setup ; au succes -> on_success.
-    - Admin configure mais session expiree -> ouvre le login."""
+    """Universal guard: requires an admin session.
+    - Admin active -> calls on_success() immediately.
+    - No admin configured -> opens the setup; on success -> on_success.
+    - Admin configured but session expired -> opens the login."""
     if _session_admin_active():
         on_success()
         return

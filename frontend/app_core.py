@@ -14,8 +14,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Helpers transverses de l'UI : application de la langue de session,
-injection des balises PWA, et lien vers le code source (AGPLv3).
+"""Cross-cutting UI helpers: applying the session language, injecting
+the PWA tags, and the link to the source code (AGPLv3).
 """
 from nicegui import ui, app
 from i18n import set_lang
@@ -23,25 +23,25 @@ from i18n import set_lang
 
 
 # ----------------------------------------------------------------------
-#  CONFORMITE AGPLv3 : lien vers le code source
+#  AGPLv3 COMPLIANCE: link to the source code
 # ----------------------------------------------------------------------
-# L'AGPLv3 exige que les utilisateurs accedant a l'application via le
-# reseau puissent obtenir le code source. On expose un lien visible
-# dans le header de chaque page pour s'acquitter de cette obligation.
+# The AGPLv3 requires that users accessing the application over the
+# network can obtain the source code. We expose a visible link in the
+# header of every page to discharge this obligation.
 SOURCE_CODE_URL = "https://github.com/GA3Dtech/PiStock"
 
 
 def _apply_user_lang():
-    """Lit la langue choisie par l'utilisateur (stockee dans le
-    storage cote serveur, lie a un cookie de session) et l'applique
-    globalement pour la requete en cours. A appeler en TOUT DEBUT de
-    chaque @ui.page."""
+    """Reads the language chosen by the user (stored in the server-side
+    storage, tied to a session cookie) and applies it globally for the
+    current request. To be called at the VERY START of each
+    @ui.page."""
     try:
-        # On utilise app.storage.user et NON app.storage.browser :
-        # browser est un cookie signe dont la valeur est posee dans
-        # les headers HTTP, donc en lecture seule en dehors de la
-        # construction initiale de la reponse. user est cote serveur,
-        # modifiable de partout (event handlers compris).
+        # We use app.storage.user and NOT app.storage.browser:
+        # browser is a signed cookie whose value is set in the HTTP
+        # headers, so it is read-only outside the initial construction
+        # of the response. user is server-side, modifiable from
+        # anywhere (including event handlers).
         lang = app.storage.user.get("lang", "en")
     except Exception:
         lang = "en"
@@ -49,14 +49,14 @@ def _apply_user_lang():
 
 
 def _register_pwa():
-    """Injecte les balises PWA dans le <head> : manifest, theme-color,
-    icone et enregistrement du service worker. A appeler depuis chaque
-    @ui.page pour que l'app soit installable.
+    """Injects the PWA tags into the <head>: manifest, theme-color,
+    icon and service worker registration. To be called from each
+    @ui.page so that the app is installable.
 
-    Le service worker n'est actif qu'en HTTPS ou sur localhost (limite
-    standard des navigateurs). Sur un Pi accédé via http://192.168.x.y
-    depuis un mobile, le SW ne s'enregistrera pas, mais le manifest
-    et les meta tags resteront utiles."""
+    The service worker is only active over HTTPS or on localhost
+    (standard browser limitation). On a Pi accessed via
+    http://192.168.x.y from a mobile, the SW will not register, but the
+    manifest and the meta tags remain useful."""
     ui.add_head_html('''
         <link rel="manifest" href="/static/manifest.json">
         <meta name="theme-color" content="#292524">

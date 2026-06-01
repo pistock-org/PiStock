@@ -1,27 +1,27 @@
 # ======================================================================
-#  PiStock — tests unitaires (logique pure + helpers base de données)
+#  PiStock — unit tests (pure logic + database helpers)
 # ======================================================================
-# Cible : les fonctions où une régression coûte cher et que l'on teste
-# trivialement — génération de codes (base 26), versions PLM, aplatissage
-# récursif des BOM, détection de cycle.
+# Target: the functions where a regression is costly and that we can
+# test trivially — code generation (base 26), PLM versions, recursive
+# BOM flattening, cycle detection.
 #
-# Lancement (depuis la racine du dépôt) :
+# To run (from the repo root):
 #     pip install pytest
 #     pytest -q
 #
-# Les helpers de base prennent tous une `session` en argument : on leur
-# fournit une base SQLite EN MÉMOIRE, isolée et jetée après chaque test.
-# Aucune dépendance à la vraie base data-pistock/.
+# The database helpers all take a `session` argument: we give them an
+# IN-MEMORY SQLite database, isolated and discarded after each test.
+# No dependency on the real data-pistock/ database.
 # ----------------------------------------------------------------------
 import pytest
 from fastapi import HTTPException
 from sqlmodel import SQLModel, Session, create_engine, select
 
-import main  # résolu via tests/conftest.py
+import main  # resolved via tests/conftest.py
 
 
 # ---------------------------------------------------------------------
-#  Fixture : session SQLite en mémoire avec le schéma de PiStock
+#  Fixture: in-memory SQLite session with the PiStock schema
 # ---------------------------------------------------------------------
 @pytest.fixture
 def session():
@@ -31,7 +31,7 @@ def session():
         yield s
 
 
-# Petits helpers de fabrication pour garder les tests lisibles
+# Small factory helpers to keep the tests readable
 def _mk_part(session, name):
     p = main.Parts(part_name=name)
     session.add(p)
@@ -47,7 +47,7 @@ def _mk_bom(session, code, description=None):
 
 
 # =====================================================================
-#  1. Conversions de codes — fonctions pures (sans base)
+#  1. Code conversions — pure functions (no database)
 # =====================================================================
 class TestProjectCodeMath:
     @pytest.mark.parametrize("code,expected", [
@@ -83,7 +83,7 @@ class TestVersionMath:
 
 
 # =====================================================================
-#  2. Génération du prochain code projet
+#  2. Generation of the next project code
 # =====================================================================
 class TestNextProjectCode:
     def test_empty_db_starts_at_AAA(self, session):
@@ -108,7 +108,7 @@ class TestNextProjectCode:
 
 
 # =====================================================================
-#  3. Génération du prochain code BOM
+#  3. Generation of the next BOM code
 # =====================================================================
 class TestNextBomCode:
     def test_empty_db_starts_at_B0001(self, session):
@@ -130,7 +130,7 @@ class TestNextBomCode:
 
 
 # =====================================================================
-#  4. Génération de version PLM (par pièce)
+#  4. PLM version generation (per part)
 # =====================================================================
 class TestNextVersionForPart:
     def test_first_revision_is_aa(self, session):
@@ -144,7 +144,7 @@ class TestNextVersionForPart:
         assert main._next_version_for_part(session, p.id) == "ab"
 
     def test_is_per_part(self, session):
-        # La version d'une pièce n'influence pas celle d'une autre.
+        # The version of one part does not influence another's.
         p1 = _mk_part(session, "alpha")
         p2 = _mk_part(session, "beta")
         session.add(main.PLM(id_parts=p1.id, version="ae"))
@@ -161,7 +161,7 @@ class TestNextVersionForPart:
 
 
 # =====================================================================
-#  5. Aplatissage récursif des BOM (sous-BOMs)
+#  5. Recursive BOM flattening (sub-BOMs)
 # =====================================================================
 class TestFlattenBom:
     def test_simple(self, session):
@@ -174,8 +174,8 @@ class TestFlattenBom:
         assert main._flatten_bom(session, a.id) == {p1.id: 5, p2.id: 2}
 
     def test_nested_with_factor(self, session):
-        # Reproduit l'exemple de la docstring : A contient 5×vis et
-        # 2×(sous-BOM B), B contient 3×ecrou + 1×rondelle.
+        # Reproduces the docstring example: A contains 5×vis and
+        # 2×(sub-BOM B), B contains 3×ecrou + 1×rondelle.
         # => {vis:5, ecrou:6, rondelle:2}
         vis = _mk_part(session, "vis-M3")
         ecrou = _mk_part(session, "ecrou")
@@ -200,7 +200,7 @@ class TestFlattenBom:
 
 
 # =====================================================================
-#  6. Détection de cycle dans la hiérarchie des BOM
+#  6. Cycle detection in the BOM hierarchy
 # =====================================================================
 class TestWouldCreateCycle:
     def test_self_reference(self, session):
@@ -208,7 +208,7 @@ class TestWouldCreateCycle:
         assert main._would_create_cycle(session, a.id, a.id) is True
 
     def test_indirect_cycle(self, session):
-        # A -> B -> C ; ajouter A comme sous-BOM de C boucle.
+        # A -> B -> C ; adding A as a sub-BOM of C creates a loop.
         a = _mk_bom(session, "B0001")
         b = _mk_bom(session, "B0002")
         c = _mk_bom(session, "B0003")
@@ -219,12 +219,12 @@ class TestWouldCreateCycle:
 
     def test_no_cycle(self, session):
         a = _mk_bom(session, "B0001")
-        d = _mk_bom(session, "B0004")  # sans enfants
+        d = _mk_bom(session, "B0004")  # no children
         assert main._would_create_cycle(session, a.id, d.id) is False
 
 
 # =====================================================================
-#  7. Authentification admin (PBKDF2 + endpoints)
+#  7. Admin authentication (PBKDF2 + endpoints)
 # =====================================================================
 class TestAdminPasswordHash:
     def test_roundtrip(self):
@@ -240,23 +240,23 @@ class TestAdminPasswordHash:
 
     def test_salt_changes_hash(self):
         s1, s2 = main._new_salt(), main._new_salt()
-        # Salts différents -> hashes différents pour le même mot de passe
+        # Different salts -> different hashes for the same password
         assert s1 != s2
         assert main._hash_password("same", s1) != main._hash_password("same", s2)
 
     def test_hash_is_hex_and_long_enough(self):
-        # SHA-256 -> 32 octets -> 64 caractères hex
+        # SHA-256 -> 32 bytes -> 64 hex characters
         h = main._hash_password("x", main._new_salt())
         assert len(h) == 64
-        int(h, 16)  # ne lève pas si bien hex
+        int(h, 16)  # does not raise if it is valid hex
 
 
 class TestCheckAdminPassword:
     def test_no_admin_configured_raises_503(self, session):
-        # Note : _check_admin_password ouvre sa propre Session sur l'engine
-        # global de main, donc on ne peut pas tester l'absence d'admin
-        # via la fixture en mémoire. On vérifie juste les cas password
-        # vide/None qui lèvent 401 sans toucher la DB.
+        # Note: _check_admin_password opens its own Session on main's
+        # global engine, so we cannot test the absence of an admin via
+        # the in-memory fixture. We only check the empty/None password
+        # cases, which raise 401 without touching the DB.
         with pytest.raises(HTTPException) as exc:
             main._check_admin_password(None)
         assert exc.value.status_code == 401
@@ -269,8 +269,8 @@ class TestCheckAdminPassword:
 
 class TestAdminModelInSchema:
     def test_admin_table_created(self, session):
-        # La table 'admin' fait partie du schéma (créée par create_all).
-        # On vérifie qu'on peut insérer et lire un enregistrement.
+        # The 'admin' table is part of the schema (created by create_all).
+        # We verify that we can insert and read a record.
         salt = main._new_salt()
         rec = main.Admin(
             salt=salt.hex(),
@@ -280,7 +280,7 @@ class TestAdminModelInSchema:
         session.commit()
         session.refresh(rec)
         assert rec.id is not None
-        assert rec.created_at  # default_factory a fonctionné
+        assert rec.created_at  # default_factory worked
 
         fetched = session.exec(select(main.Admin)).first()
         assert fetched is not None

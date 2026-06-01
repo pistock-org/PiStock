@@ -1,7 +1,7 @@
-# PiStock — services metier.
+# PiStock — business services.
 #
-# Chaque module de ce package regroupe la logique et les endpoints REST
-# d'un domaine (projects, boms, parts, stock, admin) + les helpers
-# transverses (codes, generation de versions). main.py assemble les
-# routers et re-exporte les symboles publics pour la compatibilite avec
-# l'UI, les plugins et les tests (`main.Parts`, `main._flatten_bom`...).
+# Each module in this package groups the logic and REST endpoints of one
+# domain (projects, boms, parts, stock, admin) + the cross-cutting
+# helpers (codes, version generation). main.py assembles the routers and
+# re-exports the public symbols for compatibility with the UI, the
+# plugins and the tests (`main.Parts`, `main._flatten_bom`...).

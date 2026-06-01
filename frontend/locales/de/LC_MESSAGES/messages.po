@@ -1,0 +1,507 @@
+# PiStock — German translation
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: de\n"
+
+msgid "  • {name} : need {needed}, available {available} (missing {missing})"
+msgstr "  • {name} : benötigt {needed}, verfügbar {available} (fehlt {missing})"
+
+msgid "  … and {count} others"
+msgstr "  … und {count} weitere"
+
+msgid " • project {code}"
+msgstr " • Projekt {code}"
+
+msgid "(No project)"
+msgstr "(Kein Projekt)"
+
+msgid "(empty BOM)"
+msgstr "(leere Stückliste)"
+
+msgid "(no datasheet saved)"
+msgstr "(kein Datenblatt gespeichert)"
+
+msgid "(no description)"
+msgstr "(keine Beschreibung)"
+
+msgid "+ Add"
+msgstr "+ Hinzufügen"
+
+msgid "+ New BOM"
+msgstr "+ Neue Stückliste"
+
+msgid "+ New part"
+msgstr "+ Neues Teil"
+
+msgid "+ New project"
+msgstr "+ Neues Projekt"
+
+msgid "A project can only be deleted if it no longer contains any part and any BOM."
+msgstr "Ein Projekt kann nur gelöscht werden, wenn es kein Teil und keine Stückliste mehr enthält."
+
+msgid "Add a photo of the part in stock"
+msgstr "Ein Foto des Teils im Lager hinzufügen"
+
+msgid "Add to stock"
+msgstr "Zum Bestand hinzufügen"
+
+msgid "Admin account created."
+msgstr "Admin-Konto erstellt."
+
+msgid "Admin account not found."
+msgstr "Admin-Konto nicht gefunden."
+
+msgid "Admin authentication"
+msgstr "Admin-Authentifizierung"
+
+msgid "Admin password updated."
+msgstr "Admin-Passwort aktualisiert."
+
+msgid "Admin session active"
+msgstr "Admin-Sitzung aktiv"
+
+msgid "Admin session ended."
+msgstr "Admin-Sitzung beendet."
+
+msgid "All its PLM revisions, its stock and its associated files will be erased. This operation is irreversible."
+msgstr "Alle PLM-Revisionen, der Bestand und die zugehörigen Dateien werden gelöscht. Dieser Vorgang ist unwiderruflich."
+
+msgid "All projects"
+msgstr "Alle Projekte"
+
+msgid "An admin account already exists — reload the page."
+msgstr "Ein Admin-Konto existiert bereits — laden Sie die Seite neu."
+
+msgid "Assign a project to « {name} »"
+msgstr "« {name} » einem Projekt zuordnen"
+
+msgid "Attached BOMs:"
+msgstr "Zugeordnete Stücklisten:"
+
+msgid "Attached parts:"
+msgstr "Zugeordnete Teile:"
+
+msgid "BOM"
+msgstr "Stückliste"
+
+msgid "BOM not found."
+msgstr "Stückliste nicht gefunden."
+
+msgid "BOM {code}"
+msgstr "Stückliste {code}"
+
+msgid "BOMs"
+msgstr "Stücklisten"
+
+msgid "BOMs (bills of materials)"
+msgstr "Stücklisten"
+
+msgid "BOMs concerned:"
+msgstr "Betroffene Stücklisten:"
+
+msgid "Back to catalog"
+msgstr "Zurück zum Katalog"
+
+msgid "Camera"
+msgstr "Kamera"
+
+msgid "Cancel"
+msgstr "Abbrechen"
+
+msgid "Catalog"
+msgstr "Katalog"
+
+msgid "Change admin password"
+msgstr "Admin-Passwort ändern"
+
+msgid "Change password"
+msgstr "Passwort ändern"
+
+msgid "Choose a BOM to expand:"
+msgstr "Stückliste zum Aufklappen wählen:"
+
+msgid "Choose a file"
+msgstr "Datei auswählen"
+
+msgid "Click to change project"
+msgstr "Klicken, um das Projekt zu ändern"
+
+msgid "Click to lock"
+msgstr "Klicken zum Sperren"
+
+msgid "Click to view in 3D"
+msgstr "Klicken für 3D-Ansicht"
+
+msgid "Click → {status}"
+msgstr "Klicken → {status}"
+
+msgid "Close"
+msgstr "Schließen"
+
+msgid "Component datasheet"
+msgstr "Bauteil-Datenblatt"
+
+msgid "Confirm"
+msgstr "Bestätigen"
+
+msgid "Confirm deletion"
+msgstr "Löschen bestätigen"
+
+msgid "Confirm new password"
+msgstr "Neues Passwort bestätigen"
+
+msgid "Confirm password"
+msgstr "Passwort bestätigen"
+
+msgid "Confirm project deletion"
+msgstr "Projektlöschung bestätigen"
+
+msgid "Create"
+msgstr "Erstellen"
+
+msgid "Create a BOM from the catalog, then come back here."
+msgstr "Erstellen Sie eine Stückliste im Katalog und kommen Sie dann hierher zurück."
+
+msgid "Create and assign"
+msgstr "Erstellen und zuordnen"
+
+msgid "Current password"
+msgstr "Aktuelles Passwort"
+
+msgid "Current password is invalid."
+msgstr "Aktuelles Passwort ungültig."
+
+msgid "Current project"
+msgstr "Aktuelles Projekt"
+
+msgid "Cycle detected — display interrupted."
+msgstr "Zyklus erkannt — Anzeige abgebrochen."
+
+msgid "Delete"
+msgstr "Löschen"
+
+msgid "Delete BOM « {code} »?"
+msgstr "Stückliste « {code} » löschen?"
+
+msgid "Delete revision « {version} » ?"
+msgstr "Revision « {version} » löschen?"
+
+msgid "Delete this BOM"
+msgstr "Diese Stückliste löschen"
+
+msgid "Delete this project"
+msgstr "Dieses Projekt löschen"
+
+msgid "Delete this revision"
+msgstr "Diese Revision löschen"
+
+msgid "Deleting a part permanently erases its PLM revisions, its stock and its associated files. Irreversible action."
+msgstr "Das Löschen eines Teils entfernt dauerhaft seine PLM-Revisionen, seinen Bestand und die zugehörigen Dateien. Unwiderrufliche Aktion."
+
+msgid "Description (optional)"
+msgstr "Beschreibung (optional)"
+
+msgid "Displayed revision — by {author} on {ts}"
+msgstr "Angezeigte Revision — von {author} am {ts}"
+
+msgid "Drop a plugin into the 'plugins/' folder at the project root, then restart the server."
+msgstr "Legen Sie ein Plugin in den Ordner 'plugins/' im Projektstamm und starten Sie dann den Server neu."
+
+msgid "Edit the lines"
+msgstr "Zeilen bearbeiten"
+
+msgid "Effects on stock (leaf parts):"
+msgstr "Auswirkungen auf den Bestand (Blatt-Teile):"
+
+msgid "Enter the admin password to continue."
+msgstr "Geben Sie das Admin-Passwort ein, um fortzufahren."
+
+msgid "Error: {error}"
+msgstr "Fehler: {error}"
+
+msgid "Expanded BOM"
+msgstr "Aufgeklappte Stückliste"
+
+msgid "File"
+msgstr "Datei"
+
+msgid "How many times?"
+msgstr "Wie oft?"
+
+msgid "Initial setup — admin password"
+msgstr "Ersteinrichtung — Admin-Passwort"
+
+msgid "Invalid password."
+msgstr "Ungültiges Passwort."
+
+msgid "Last used"
+msgstr "Zuletzt verwendet"
+
+msgid "Location"
+msgstr "Lagerort"
+
+msgid "Locked — click to unlock"
+msgstr "Gesperrt — klicken zum Entsperren"
+
+msgid "Log in as admin"
+msgstr "Als Admin anmelden"
+
+msgid "Log out admin"
+msgstr "Admin abmelden"
+
+msgid "Manage stock"
+msgstr "Bestand verwalten"
+
+msgid "New BOM"
+msgstr "Neue Stückliste"
+
+msgid "New part"
+msgstr "Neues Teil"
+
+msgid "New password (min. 6 chars)"
+msgstr "Neues Passwort (mind. 6 Zeichen)"
+
+msgid "New project"
+msgstr "Neues Projekt"
+
+msgid "No BOM in the database."
+msgstr "Keine Stückliste in der Datenbank."
+
+msgid "No BOM. Click « + New BOM » to create one."
+msgstr "Keine Stückliste. Klicken Sie auf « + Neue Stückliste », um eine zu erstellen."
+
+msgid "No admin account is configured. Choose a password: it will be required for any deletion and any unlock."
+msgstr "Es ist kein Admin-Konto konfiguriert. Wählen Sie ein Passwort: Es wird für jede Löschung und jede Entsperrung benötigt."
+
+msgid "No line. Add a part below."
+msgstr "Keine Zeile. Fügen Sie unten ein Teil hinzu."
+
+msgid "No other BOM available to be added as a sub-BOM."
+msgstr "Keine andere Stückliste verfügbar, die als Unter-Stückliste hinzugefügt werden kann."
+
+msgid "No part for project '{code}'."
+msgstr "Kein Teil für Projekt '{code}'."
+
+msgid "No part in the database yet. Click « + New part » or export one from FreeCAD."
+msgstr "Noch kein Teil in der Datenbank. Klicken Sie auf « + Neues Teil » oder exportieren Sie eines aus FreeCAD."
+
+msgid "No part with id {part_id}."
+msgstr "Kein Teil mit der ID {part_id}."
+
+msgid "No plugin installed"
+msgstr "Kein Plugin installiert"
+
+msgid "No project yet. Click « + New project » to create one."
+msgstr "Noch kein Projekt. Klicken Sie auf « + Neues Projekt », um eines zu erstellen."
+
+msgid "No project yet. Create one with « + New project »."
+msgstr "Noch kein Projekt. Erstellen Sie eines mit « + Neues Projekt »."
+
+msgid "No revision yet."
+msgstr "Noch keine Revision."
+
+msgid "No thumbnail"
+msgstr "Kein Vorschaubild"
+
+msgid "Part"
+msgstr "Teil"
+
+msgid "Part locked"
+msgstr "Teil gesperrt"
+
+msgid "Part name"
+msgstr "Teilbezeichnung"
+
+msgid "Part not found"
+msgstr "Teil nicht gefunden"
+
+msgid "Part options"
+msgstr "Teiloptionen"
+
+msgid "Password"
+msgstr "Passwort"
+
+msgid "Password (min. 6 characters)"
+msgstr "Passwort (mind. 6 Zeichen)"
+
+msgid "Password must be at least 6 characters."
+msgstr "Das Passwort muss mindestens 6 Zeichen lang sein."
+
+msgid "Permanently delete"
+msgstr "Dauerhaft löschen"
+
+msgid "Permanently delete project « {code} »?"
+msgstr "Projekt « {code} » dauerhaft löschen?"
+
+msgid "PiStock — 3D View"
+msgstr "PiStock — 3D-Ansicht"
+
+msgid "PiStock — Catalog"
+msgstr "PiStock — Katalog"
+
+msgid "PiStock — Plugins"
+msgstr "PiStock — Plugins"
+
+msgid "Plugins"
+msgstr "Plugins"
+
+msgid "Project"
+msgstr "Projekt"
+
+msgid "Project (optional)"
+msgstr "Projekt (optional)"
+
+msgid "Project created but not found, aborting."
+msgstr "Projekt erstellt, aber nicht gefunden, Abbruch."
+
+msgid "Project {code} created and assigned."
+msgstr "Projekt {code} erstellt und zugeordnet."
+
+msgid "Project:"
+msgstr "Projekt:"
+
+msgid "Projects"
+msgstr "Projekte"
+
+msgid "Qty"
+msgstr "Anz."
+
+msgid "Quantity"
+msgstr "Menge"
+
+msgid "Refresh the page"
+msgstr "Seite aktualisieren"
+
+msgid "Remove from stock"
+msgstr "Aus Bestand entnehmen"
+
+msgid "Remove the part from these BOMs first, then try again."
+msgstr "Entfernen Sie das Teil zuerst aus diesen Stücklisten und versuchen Sie es erneut."
+
+msgid "Replace the datasheet"
+msgstr "Datenblatt ersetzen"
+
+msgid "Revision history"
+msgstr "Revisionsverlauf"
+
+msgid "Revision {version} — by {author} on {ts}"
+msgstr "Revision {version} — von {author} am {ts}"
+
+msgid "Save"
+msgstr "Speichern"
+
+msgid "Select a part."
+msgstr "Wählen Sie ein Teil."
+
+msgid "Select a sub-BOM."
+msgstr "Wählen Sie eine Unter-Stückliste."
+
+msgid "Set as main"
+msgstr "Als Hauptrevision festlegen"
+
+msgid "Source code (AGPLv3)"
+msgstr "Quellcode (AGPLv3)"
+
+msgid "Stock photo"
+msgstr "Bestandsfoto"
+
+msgid "Stock — « {name} »"
+msgstr "Bestand — « {name} »"
+
+msgid "Sub-BOM"
+msgstr "Unter-Stückliste"
+
+msgid "Supply"
+msgstr "Beschaffung"
+
+msgid "Supply URL, supplier, notes..."
+msgstr "Bezugs-URL, Lieferant, Notizen..."
+
+msgid "Take a photo"
+msgstr "Foto aufnehmen"
+
+msgid "Take a photo with the camera"
+msgstr "Foto mit der Kamera aufnehmen"
+
+msgid "The new password must be at least 6 characters."
+msgstr "Das neue Passwort muss mindestens 6 Zeichen lang sein."
+
+msgid "The two entries do not match."
+msgstr "Die beiden Eingaben stimmen nicht überein."
+
+msgid "This BOM is empty."
+msgstr "Diese Stückliste ist leer."
+
+msgid "This action also deletes all its lines. The stock of the parts is NOT modified."
+msgstr "Diese Aktion löscht auch alle Zeilen. Der Bestand der Teile wird NICHT geändert."
+
+msgid "This action is irreversible: the .FCStd, .glb and .png files will be erased from disk."
+msgstr "Diese Aktion ist unwiderruflich: Die Dateien .FCStd, .glb und .png werden von der Festplatte gelöscht."
+
+msgid "This part has no associated 3D model."
+msgstr "Dieses Teil hat kein zugehöriges 3D-Modell."
+
+msgid "To assemble 1× {code}, you need in total:"
+msgstr "Um 1× {code} zu montieren, benötigen Sie insgesamt:"
+
+msgid "Totals per leaf part"
+msgstr "Summen pro Blatt-Teil"
+
+msgid "Unassign"
+msgstr "Zuordnung aufheben"
+
+msgid "You are about to permanently delete the part « {name} »."
+msgstr "Sie sind dabei, das Teil « {name} » dauerhaft zu löschen."
+
+msgid "by {author}"
+msgstr "von {author}"
+
+msgid "displayed"
+msgstr "angezeigt"
+
+msgid "e.g.: Drawer A3, shelf 2"
+msgstr "z.B.: Schublade A3, Regal 2"
+
+msgid "e.g.: bracket-v2"
+msgstr "z.B.: bracket-v2"
+
+msgid "no project"
+msgstr "kein Projekt"
+
+msgid "project {code}"
+msgstr "Projekt {code}"
+
+msgid "status « {status} »"
+msgstr "Status « {status} »"
+
+msgid "{code} — {description}"
+msgstr "{code} — {description}"
+
+msgid "{count} line(s)"
+msgstr "{count} Zeile(n)"
+
+msgid "{count} plugin(s) installed"
+msgstr "{count} Plugin(s) installiert"
+
+msgid "{title} — BOM {code}"
+msgstr "{title} — Stückliste {code}"
+
+msgid "← Back to list"
+msgstr "← Zurück zur Liste"
+
+msgid "★ main"
+msgstr "★ Haupt"
+
+msgid "⚠️  Error: {error}"
+msgstr "⚠️  Fehler: {error}"
+
+msgid "⚠️ Danger zone"
+msgstr "⚠️ Gefahrenzone"
+
+msgid "🔒 locked"
+msgstr "🔒 gesperrt"
+
+msgid "🗑 Permanently delete this part…"
+msgstr "🗑 Dieses Teil dauerhaft löschen…"
+

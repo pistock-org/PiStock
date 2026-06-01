@@ -15,13 +15,13 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Generation d'identifiants lisibles et incrementaux :
-  - code projet (AAA..ZZZ, base 26 sur 3 lettres) ;
-  - code BOM (B0001..B9999) ;
-  - version PLM par piece (aa..zz, base 26 sur 2 lettres).
+Generation of readable, incremental identifiers:
+  - project code (AAA..ZZZ, base 26 over 3 letters);
+  - BOM code (B0001..B9999);
+  - PLM version per part (aa..zz, base 26 over 2 letters).
 
-Plus le helper `_get_current_plm` qui centralise la regle "quelle
-revision afficher" (is_main sinon la plus recente).
+Plus the `_get_current_plm` helper, which centralizes the "which
+revision to display" rule (is_main, otherwise the most recent).
 """
 from fastapi import HTTPException
 from sqlmodel import Session, select
@@ -30,36 +30,36 @@ from model import Project, Bom, PLM
 
 
 # ----------------------------------------------------------------------
-#  HELPERS GENERATION DU CODE PROJET
+#  PROJECT CODE GENERATION HELPERS
 # ----------------------------------------------------------------------
-# Le code projet est un "nombre" en base 26 sur 3 positions :
+# The project code is a "number" in base 26 over 3 positions:
 #   AAA = 0, AAB = 1, ..., AAZ = 25, ABA = 26, ..., ZZZ = 17575.
-# On le manipule comme un entier pour l'incrementer, puis on le
-# reconvertit en chaine. Cette approche est plus robuste qu'une
-# manipulation caractere par caractere avec gestion des retenues.
+# We manipulate it as an integer to increment it, then convert it back
+# to a string. This approach is more robust than a character-by-character
+# manipulation with carry handling.
 PROJECT_CODE_MAX = 26 ** 3 - 1  # = 17575 -> "ZZZ"
 
 
 def _code_to_int(code: str) -> int:
-    """Convertit 'AAA'->0, 'AAB'->1, ..., 'ZZZ'->17575."""
+    """Convert 'AAA'->0, 'AAB'->1, ..., 'ZZZ'->17575."""
     return ((ord(code[0]) - ord("A")) * 676
             + (ord(code[1]) - ord("A")) * 26
             + (ord(code[2]) - ord("A")))
 
 
 def _int_to_code(n: int) -> str:
-    """Inverse de _code_to_int. n doit etre dans [0, 17575]."""
+    """Inverse of _code_to_int. n must be in [0, 17575]."""
     return (chr(ord("A") + n // 676)
             + chr(ord("A") + (n // 26) % 26)
             + chr(ord("A") + n % 26))
 
 
 def _next_project_code(session: Session) -> str:
-    """Calcule le prochain code disponible. Si aucun projet n'existe
-    encore : 'AAA'. Sinon : (max existant) + 1. Leve HTTPException si
-    on depasse 'ZZZ' (limite tres haute en pratique : 17576 projets)."""
-    # Comme tous les codes ont 3 caracteres A-Z, l'ordre alphabetique
-    # coincide avec l'ordre numerique : un simple MAX(code) suffit.
+    """Compute the next available code. If no project exists yet:
+    'AAA'. Otherwise: (existing max) + 1. Raises HTTPException if we go
+    past 'ZZZ' (a very high limit in practice: 17576 projects)."""
+    # Since all codes are 3 characters A-Z, the alphabetical order
+    # coincides with the numerical order: a simple MAX(code) suffices.
     last = session.exec(
         select(Project.code).order_by(Project.code.desc()).limit(1)
     ).first()
@@ -75,11 +75,11 @@ def _next_project_code(session: Session) -> str:
 
 
 # ----------------------------------------------------------------------
-#  HELPER GENERATION CODE BOM
+#  BOM CODE GENERATION HELPER
 # ----------------------------------------------------------------------
-# Format : 'B' + 4 chiffres zero-padded (B0001..B9999). L'ordre
-# alphabetique coincide avec l'ordre numerique grace au zero-padding,
-# donc on peut faire un MAX(code) en SQL.
+# Format: 'B' + 4 zero-padded digits (B0001..B9999). The alphabetical
+# order coincides with the numerical order thanks to zero-padding, so we
+# can do a MAX(code) in SQL.
 BOM_CODE_MAX = 9999
 
 
@@ -89,7 +89,7 @@ def _next_bom_code(session: Session) -> str:
     ).first()
     if last is None:
         return "B0001"
-    # Extrait la partie numerique (apres le 'B')
+    # Extract the numeric part (after the 'B')
     try:
         n = int(last[1:])
     except (ValueError, IndexError):
@@ -104,10 +104,10 @@ def _next_bom_code(session: Session) -> str:
 
 
 # ----------------------------------------------------------------------
-#  HELPER GENERATION VERSION PLM
+#  PLM VERSION GENERATION HELPER
 # ----------------------------------------------------------------------
-# Meme logique que les codes projet, mais sur 2 lettres minuscules
-# (aa..zz, soit 676 versions max par piece). Calcule PAR PIECE.
+# Same logic as the project codes, but over 2 lowercase letters
+# (aa..zz, i.e. 676 versions max per part). Computed PER PART.
 PLM_VERSION_MAX = 26 * 26 - 1  # = 675 -> "zz"
 
 
@@ -120,8 +120,8 @@ def _int_to_version(n: int) -> str:
 
 
 def _next_version_for_part(session: Session, part_id: int) -> str:
-    """Renvoie la prochaine version PLM pour une piece donnee.
-    Premiere revision -> 'aa'. Sinon : (max existant pour cette piece) + 1."""
+    """Return the next PLM version for a given part.
+    First revision -> 'aa'. Otherwise: (existing max for this part) + 1."""
     last = session.exec(
         select(PLM.version)
         .where(PLM.id_parts == part_id)
@@ -140,12 +140,12 @@ def _next_version_for_part(session: Session, part_id: int) -> str:
 
 
 def _get_current_plm(session: Session, part_id: int):
-    """Renvoie la revision PLM "courante" d'une piece :
-    - celle marquee is_main=True si elle existe
-    - sinon, la plus recente par timestamp
-    - None si la piece n'a aucune revision PLM
-    Centralise la logique de "quelle revision afficher" pour rester
-    coherent entre /parts/full, /parts/{id} et le dashboard."""
+    """Return the "current" PLM revision of a part:
+    - the one marked is_main=True if it exists
+    - otherwise, the most recent by timestamp
+    - None if the part has no PLM revision
+    Centralizes the "which revision to display" logic to stay consistent
+    across /parts/full, /parts/{id} and the dashboard."""
     main = session.exec(
         select(PLM)
         .where(PLM.id_parts == part_id)

@@ -15,11 +15,11 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Endpoints BOM (Bill of Materials / nomenclatures) + logique de
-hierarchie (sous-BOMs) : aplatissage recursif et detection de cycle.
+BOM endpoints (Bill of Materials) + hierarchy logic (sub-BOMs):
+recursive flattening and cycle detection.
 
-Les helpers `_flatten_bom` et `_would_create_cycle` sont aussi utilises
-par les plugins (cf. plugins/bom_tree) via la facade main.
+The `_flatten_bom` and `_would_create_cycle` helpers are also used by
+the plugins (see plugins/bom_tree) through the main facade.
 """
 from fastapi import APIRouter, Form, HTTPException, Depends
 from sqlmodel import Session, select
@@ -35,28 +35,28 @@ router = APIRouter()
 
 
 # ----------------------------------------------------------------------
-#  HELPERS BOM : HIERARCHIE (sous-BOMs)
+#  BOM HELPERS: HIERARCHY (sub-BOMs)
 # ----------------------------------------------------------------------
 def _flatten_bom(session: Session, bom_id: int, factor: int = 1,
                   visited: set | None = None) -> dict[int, int]:
-    """Parcourt recursivement la BOM et retourne un dict
-    {part_id: quantite_totale} en accumulant les besoins des sous-BOMs.
+    """Recursively walks the BOM and returns a dict
+    {part_id: total_quantity}, accumulating the requirements of sub-BOMs.
 
-    'factor' multiplie tout (utile pour les calculs de stock-add/sub
-    avec un facteur global). 'visited' garde l'ensemble des BOM_IDs
-    deja traversees pour eviter les boucles infinies (securite, meme
-    si _would_create_cycle previent normalement leur creation).
+    'factor' multiplies everything (useful for stock-add/sub computations
+    with a global factor). 'visited' keeps the set of BOM_IDs already
+    traversed to avoid infinite loops (a safety net, even though
+    _would_create_cycle normally prevents their creation).
 
-    Exemple : si BOM A contient :
+    Example: if BOM A contains:
        - 5 vis-M3
-       - 2× sous-BOM B (qui contient 3 ecrou + 1 rondelle)
-    alors _flatten_bom(A, factor=1) renvoie :
+       - 2x sub-BOM B (which contains 3 ecrou + 1 rondelle)
+    then _flatten_bom(A, factor=1) returns:
        {vis-M3: 5, ecrou: 6, rondelle: 2}
     """
     if visited is None:
         visited = set()
     if bom_id in visited:
-        # Cycle : ne devrait pas arriver, mais on protege quand meme.
+        # Cycle: should not happen, but we guard against it anyway.
         raise HTTPException(
             status_code=500,
             detail=f"Cycle detecte lors du parcours de la BOM "
@@ -73,8 +73,8 @@ def _flatten_bom(session: Session, bom_id: int, factor: int = 1,
             delta = line.quantity * factor
             totals[line.id_parts] = totals.get(line.id_parts, 0) + delta
         elif line.id_subbom is not None:
-            # Recursion : on accumule les besoins de la sous-BOM,
-            # multiplies par la quantite de cette ligne.
+            # Recursion: accumulate the requirements of the sub-BOM,
+            # multiplied by the quantity on this line.
             sub_totals = _flatten_bom(
                 session, line.id_subbom,
                 factor=line.quantity * factor,
@@ -82,26 +82,26 @@ def _flatten_bom(session: Session, bom_id: int, factor: int = 1,
             )
             for pid, qty in sub_totals.items():
                 totals[pid] = totals.get(pid, 0) + qty
-        # Les lignes avec NI part NI subbom sont ignorees (donnee
-        # corrompue, mais pas raison de planter)
+        # Lines with NEITHER part NOR subbom are ignored (corrupt
+        # data, but no reason to crash)
     return totals
 
 
 def _would_create_cycle(session: Session, parent_bom_id: int,
                           candidate_subbom_id: int) -> bool:
-    """Verifie si ajouter candidate_subbom_id comme sous-BOM de
-    parent_bom_id creerait un cycle. True = cycle detecte (refuser).
+    """Checks whether adding candidate_subbom_id as a sub-BOM of
+    parent_bom_id would create a cycle. True = cycle detected (reject).
 
-    Trois cas :
-    1. Auto-reference : parent == candidate
-    2. Parent est ancetre direct ou indirect de candidate
-       (qui irait creer une boucle si on ajoute le lien)
+    Two cases:
+    1. Self-reference: parent == candidate
+    2. Parent is a direct or indirect ancestor of candidate
+       (which would create a loop if the link is added)
     """
     if parent_bom_id == candidate_subbom_id:
         return True
-    # DFS sur la descendance de candidate. Si on tombe sur parent,
-    # c'est qu'il y a deja un chemin candidate -> ... -> parent,
-    # et ajouter parent -> candidate boucle.
+    # DFS over candidate's descendants. If we reach parent, there is
+    # already a path candidate -> ... -> parent, so adding
+    # parent -> candidate would create a loop.
     stack = [candidate_subbom_id]
     visited = set()
     while stack:
@@ -122,12 +122,12 @@ def _would_create_cycle(session: Session, parent_bom_id: int,
 
 
 # ======================================================================
-#  ENDPOINTS BOM
+#  BOM ENDPOINTS
 # ======================================================================
 @router.get("/api/v1/boms")
 def list_boms(project_code: str | None = None):
-    """Liste les BOMs. Chaque entree comprend le code, la description,
-    le projet associe (si rattachee), et le nombre de lignes."""
+    """Lists the BOMs. Each entry includes the code, the description,
+    the associated project (if linked), and the line count."""
     with Session(engine) as session:
         query = select(Bom).order_by(Bom.code)
         if project_code:
@@ -138,15 +138,15 @@ def list_boms(project_code: str | None = None):
                 return []
             query = query.where(Bom.id_project == project.id)
         boms = session.exec(query).all()
-        # Pre-charge codes projet pour eviter une requete par BOM
+        # Preload project codes to avoid one query per BOM
         projects_by_id = {
             p.id: p.code
             for p in session.exec(select(Project)).all()
         }
         result = []
         for b in boms:
-            # Compte les lignes (sans charger les objets) pour rester
-            # leger sur la liste.
+            # Count the lines (without loading the objects) to keep
+            # the listing lightweight.
             n_lines = session.exec(
                 select(BomLine).where(BomLine.id_bom == b.id)
             ).all()
@@ -163,10 +163,10 @@ def list_boms(project_code: str | None = None):
 
 @router.get("/api/v1/boms/{bom_id}")
 def get_bom(bom_id: int):
-    """Detail d'une BOM avec toutes ses lignes. Chaque ligne est soit
-    une piece (id_parts + part_name), soit une sous-BOM (id_subbom +
-    subbom_code + subbom_description). Le champ 'line_type' vaut
-    'part' ou 'subbom' selon le cas."""
+    """Detail of a BOM with all its lines. Each line is either a part
+    (id_parts + part_name) or a sub-BOM (id_subbom + subbom_code +
+    subbom_description). The 'line_type' field is 'part' or 'subbom'
+    depending on the case."""
     with Session(engine) as session:
         bom = session.get(Bom, bom_id)
         if bom is None:
@@ -180,8 +180,8 @@ def get_bom(bom_id: int):
             select(BomLine).where(BomLine.id_bom == bom_id)
             .order_by(BomLine.id)
         ).all()
-        # Pre-charge les parts ET les sous-BOMs referencees pour eviter
-        # une requete par ligne.
+        # Preload the referenced parts AND sub-BOMs to avoid one query
+        # per line.
         part_ids = {l.id_parts for l in lines if l.id_parts is not None}
         subbom_ids = {l.id_subbom for l in lines if l.id_subbom is not None}
         parts_by_id = {
@@ -215,7 +215,7 @@ def get_bom(bom_id: int):
                 entry["subbom_code"] = sub.code if sub else "?"
                 entry["subbom_description"] = sub.description if sub else None
             else:
-                # Ligne corrompue (ni part ni subbom) - rare, on log et skip
+                # Corrupt line (neither part nor subbom) - rare, log and skip
                 logger.warning(f"BomLine id={l.id} sans part ni subbom.")
                 continue
             result_lines.append(entry)
@@ -233,7 +233,7 @@ def get_bom(bom_id: int):
 @router.post("/api/v1/boms")
 def create_bom(description: str = Form(default=""),
                 id_project: int | None = Form(default=None)):
-    """Cree une BOM avec un code auto-genere (B0001, B0002...)."""
+    """Creates a BOM with an auto-generated code (B0001, B0002...)."""
     description = (description or "").strip() or None
     with Session(engine) as session:
         if id_project is not None:
@@ -260,14 +260,14 @@ def create_bom(description: str = Form(default=""),
 @router.delete("/api/v1/boms/{bom_id}")
 def delete_bom(bom_id: int,
                _admin: None = Depends(_require_admin)):
-    """Supprime une BOM ET toutes ses lignes (suppression en cascade
-    geree manuellement puisque SQLite n'enforce pas les FK par defaut)."""
+    """Deletes a BOM AND all its lines (cascade deletion handled
+    manually since SQLite does not enforce FKs by default)."""
     with Session(engine) as session:
         bom = session.get(Bom, bom_id)
         if bom is None:
             raise HTTPException(status_code=404,
                                 detail=f"BOM id={bom_id} introuvable.")
-        # Cascade manuelle
+        # Manual cascade
         lines = session.exec(
             select(BomLine).where(BomLine.id_bom == bom_id)
         ).all()
@@ -285,15 +285,15 @@ def add_bom_line(bom_id: int,
                   part_id: int | None = Form(default=None),
                   subbom_id: int | None = Form(default=None),
                   quantity: int = Form(default=1)):
-    """Ajoute une ligne a une BOM : soit une piece (part_id), soit une
-    sous-BOM (subbom_id). EXACTEMENT UN des deux doit etre fourni.
+    """Adds a line to a BOM: either a part (part_id) or a sub-BOM
+    (subbom_id). EXACTLY ONE of the two must be provided.
 
-    Si une ligne identique (meme type ET meme cible) existe deja, la
-    quantite est CUMULEE plutot que de creer une nouvelle ligne.
+    If an identical line (same type AND same target) already exists,
+    the quantity is ACCUMULATED rather than creating a new line.
 
-    Pour subbom_id : refus si l'ajout creerait un cycle dans la
-    hierarchie (auto-reference ou boucle indirecte)."""
-    # Validation : exactement un des deux non-null
+    For subbom_id: rejected if the addition would create a cycle in the
+    hierarchy (self-reference or indirect loop)."""
+    # Validation: exactly one of the two non-null
     if (part_id is None) == (subbom_id is None):
         raise HTTPException(
             status_code=400,
@@ -309,7 +309,7 @@ def add_bom_line(bom_id: int,
                                 detail=f"BOM id={bom_id} introuvable.")
 
         if part_id is not None:
-            # --- Ligne de type "piece" ---
+            # --- "part" type line ---
             part = session.get(Parts, part_id)
             if part is None:
                 raise HTTPException(
@@ -324,14 +324,14 @@ def add_bom_line(bom_id: int,
             new_line = BomLine(id_bom=bom_id, id_parts=part_id,
                                  quantity=quantity)
         else:
-            # --- Ligne de type "sous-BOM" ---
+            # --- "sub-BOM" type line ---
             sub = session.get(Bom, subbom_id)
             if sub is None:
                 raise HTTPException(
                     status_code=404,
                     detail=f"BOM id={subbom_id} introuvable."
                 )
-            # Detection de cycle AVANT toute modification de la base
+            # Cycle detection BEFORE any modification of the database
             if _would_create_cycle(session, bom_id, subbom_id):
                 raise HTTPException(
                     status_code=400,
@@ -364,7 +364,7 @@ def add_bom_line(bom_id: int,
 @router.put("/api/v1/boms/{bom_id}/lines/{line_id}")
 def update_bom_line(bom_id: int, line_id: int,
                      quantity: int = Form(...)):
-    """Met a jour la quantite d'une ligne BOM."""
+    """Updates the quantity of a BOM line."""
     if quantity <= 0:
         raise HTTPException(status_code=400,
                             detail="La quantité doit être > 0.")
@@ -381,7 +381,7 @@ def update_bom_line(bom_id: int, line_id: int,
 
 @router.delete("/api/v1/boms/{bom_id}/lines/{line_id}")
 def delete_bom_line(bom_id: int, line_id: int):
-    """Supprime une ligne d'une BOM."""
+    """Deletes a line from a BOM."""
     with Session(engine) as session:
         line = session.get(BomLine, line_id)
         if line is None or line.id_bom != bom_id:
@@ -394,11 +394,11 @@ def delete_bom_line(bom_id: int, line_id: int):
 
 @router.post("/api/v1/boms/{bom_id}/stock-add")
 def bom_stock_add(bom_id: int, factor: int = Form(default=1)):
-    """Ajoute 'factor' fois la BOM au stock. Traverse RECURSIVEMENT
-    les sous-BOMs : si la BOM A contient 2× une sous-BOM B, et que B
-    contient 3 vis, alors stock-add(A, factor=1) ajoute 6 vis au stock.
+    """Adds the BOM to stock 'factor' times. Traverses sub-BOMs
+    RECURSIVELY: if BOM A contains 2x a sub-BOM B, and B contains
+    3 vis, then stock-add(A, factor=1) adds 6 vis to stock.
 
-    Cree les lignes Stock manquantes. Atomique : tout ou rien."""
+    Creates the missing Stock lines. Atomic: all or nothing."""
     if factor <= 0:
         raise HTTPException(status_code=400,
                             detail="Le facteur doit être > 0.")
@@ -407,7 +407,7 @@ def bom_stock_add(bom_id: int, factor: int = Form(default=1)):
         if bom is None:
             raise HTTPException(status_code=404,
                                 detail=f"BOM id={bom_id} introuvable.")
-        # Verifie qu'il y a au moins une ligne
+        # Check that there is at least one line
         any_line = session.exec(
             select(BomLine).where(BomLine.id_bom == bom_id).limit(1)
         ).first()
@@ -415,10 +415,10 @@ def bom_stock_add(bom_id: int, factor: int = Form(default=1)):
             raise HTTPException(status_code=400,
                                 detail="La BOM est vide.")
 
-        # Flatten hierarchique -> {part_id: total_qty}
+        # Hierarchical flatten -> {part_id: total_qty}
         totals = _flatten_bom(session, bom_id, factor=factor)
 
-        # Applique les increments aux pieces feuilles
+        # Apply the increments to the leaf parts
         changes = []
         for part_id, delta in totals.items():
             stock = _get_or_create_stock(session, part_id)
@@ -437,9 +437,9 @@ def bom_stock_add(bom_id: int, factor: int = Form(default=1)):
 
 @router.post("/api/v1/boms/{bom_id}/stock-sub")
 def bom_stock_sub(bom_id: int, factor: int = Form(default=1)):
-    """Retire 'factor' fois la BOM du stock. Traverse RECURSIVEMENT
-    les sous-BOMs. ATOMIQUE : si une seule piece n'a pas assez,
-    on REFUSE tout et on renvoie la liste exhaustive des manques
+    """Removes the BOM from stock 'factor' times. Traverses sub-BOMs
+    RECURSIVELY. ATOMIC: if even a single part is short, EVERYTHING is
+    rejected and the exhaustive list of shortages is returned
     (status 409 Conflict)."""
     if factor <= 0:
         raise HTTPException(status_code=400,
@@ -456,10 +456,10 @@ def bom_stock_sub(bom_id: int, factor: int = Form(default=1)):
             raise HTTPException(status_code=400,
                                 detail="La BOM est vide.")
 
-        # Flatten hierarchique -> {part_id: total_qty_needed}
+        # Hierarchical flatten -> {part_id: total_qty_needed}
         totals = _flatten_bom(session, bom_id, factor=factor)
 
-        # Phase 1 : verification atomique de la disponibilite
+        # Phase 1: atomic availability check
         shortages = []
         for part_id, needed in totals.items():
             stock = session.exec(
@@ -484,7 +484,7 @@ def bom_stock_sub(bom_id: int, factor: int = Form(default=1)):
                 }
             )
 
-        # Phase 2 : application des decrements
+        # Phase 2: apply the decrements
         changes = []
         for part_id, needed in totals.items():
             stock = _get_or_create_stock(session, part_id)
@@ -502,15 +502,15 @@ def bom_stock_sub(bom_id: int, factor: int = Form(default=1)):
 
 
 # ----------------------------------------------------------------------
-#  ENDPOINT : creation atomique d'une BOM a partir d'un assemblage
+#  ENDPOINT: atomic creation of a BOM from an assembly
 # ----------------------------------------------------------------------
-# Recoit un JSON contenant : description, id_project optionnel, et une
-# liste de lignes {name, quantity, use_existing_id?}. Pour chaque ligne :
-#   - si use_existing_id fourni : on l'utilise direct
-#   - sinon, on cherche une piece existante avec ce nom : si trouvee,
-#     on l'utilise ; sinon, on cree une nouvelle piece.
-# Tout est fait dans UNE transaction : si quoi que ce soit echoue
-# (nom invalide, ID inexistant), RIEN n'est cree.
+# Receives a JSON containing: description, optional id_project, and a
+# list of lines {name, quantity, use_existing_id?}. For each line:
+#   - if use_existing_id is provided: use it directly
+#   - otherwise, look for an existing part with that name: if found,
+#     use it; otherwise, create a new part.
+# Everything is done in ONE transaction: if anything fails
+# (invalid name, non-existent ID), NOTHING is created.
 
 class BomFromAssemblyLine(BaseModel):
     name: str
@@ -526,18 +526,17 @@ class BomFromAssemblyRequest(BaseModel):
 
 @router.post("/api/v1/boms/from-assembly")
 def create_bom_from_assembly(req: BomFromAssemblyRequest):
-    """Cree une BOM avec ses lignes a partir d'un scan d'assemblage.
-    Cree au passage les pieces qui n'existent pas encore. Atomique :
-    tout ou rien."""
+    """Creates a BOM with its lines from an assembly scan. Also creates
+    the parts that do not yet exist. Atomic: all or nothing."""
     if not req.lines:
         raise HTTPException(status_code=400,
                             detail="La liste des lignes est vide.")
     description = (req.description or "").strip() or None
 
-    # Pre-merge cote serveur : si plusieurs lignes ont le meme nom
-    # (cas pas impossible si la macro envoie a la fois des doublons et
-    # des Links separes), on cumule les quantites. Le merge se fait
-    # par cle = use_existing_id si fourni, sinon par nom.
+    # Server-side pre-merge: if several lines share the same name
+    # (a possible case if the macro sends both duplicates and separate
+    # Links), accumulate the quantities. The merge is keyed by
+    # use_existing_id if provided, otherwise by name.
     merged: dict[tuple, int] = {}
     for line in req.lines:
         if line.quantity <= 0:
@@ -551,7 +550,7 @@ def create_bom_from_assembly(req: BomFromAssemblyRequest):
         merged[key] = merged.get(key, 0) + line.quantity
 
     with Session(engine) as session:
-        # Verifie le projet si specifie
+        # Check the project if specified
         if req.id_project is not None:
             if session.get(Project, req.id_project) is None:
                 raise HTTPException(
@@ -559,11 +558,11 @@ def create_bom_from_assembly(req: BomFromAssemblyRequest):
                     detail=f"Projet id={req.id_project} introuvable."
                 )
 
-        # Phase 1 : resoudre toutes les lignes en (part_id, qty),
-        # en creant les pieces manquantes au passage. On accumule
-        # dans une liste pour la phase 2.
+        # Phase 1: resolve all lines into (part_id, qty), creating the
+        # missing parts along the way. Accumulate into a list for
+        # phase 2.
         resolved: list[tuple[int, int]] = []  # [(part_id, qty), ...]
-        created_parts: list[dict] = []        # pour le rapport final
+        created_parts: list[dict] = []        # for the final report
 
         for key, qty in merged.items():
             if key[0] == "id":
@@ -583,28 +582,28 @@ def create_bom_from_assembly(req: BomFromAssemblyRequest):
                         status_code=400,
                         detail="Nom de pièce vide dans la liste."
                     )
-                # Cherche par nom exact
+                # Look up by exact name
                 existing = session.exec(
                     select(Parts).where(Parts.part_name == name)
                 ).first()
                 if existing is not None:
                     resolved.append((existing.id, qty))
                 else:
-                    # Cree la piece (Parts vide, sans CAO, sans projet)
+                    # Create the part (empty Parts, no CAD, no project)
                     new_part = Parts(part_name=name)
                     session.add(new_part)
-                    session.flush()  # pour avoir new_part.id
+                    session.flush()  # to obtain new_part.id
                     resolved.append((new_part.id, qty))
                     created_parts.append({
                         "id": new_part.id,
                         "part_name": new_part.part_name,
                     })
 
-        # Phase 2 : cree la BOM et ses lignes
+        # Phase 2: create the BOM and its lines
         try:
             code = _next_bom_code(session)
         except HTTPException:
-            raise  # 507 sur dépassement BOM_CODE_MAX
+            raise  # 507 on BOM_CODE_MAX overflow
 
         bom = Bom(code=code, description=description,
                    id_project=req.id_project)

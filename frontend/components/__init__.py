@@ -1,1 +1,1 @@
-# PiStock — composants d'interface reutilisables (en-tete, admin).
+# PiStock — reusable UI components (header, admin).

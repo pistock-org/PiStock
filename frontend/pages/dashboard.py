@@ -14,9 +14,9 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Page catalogue (/) : liste des pieces en cartes, filtres, et tous
-les dialogues associes (options piece, suppression, assignation de
-projet, stock, gestion des BOMs).
+"""Catalog page (/): list of parts as cards, filters, and all the
+associated dialogs (part options, deletion, project assignment,
+stock, BOM management).
 """
 import os
 import json
@@ -37,23 +37,23 @@ from db import (fetch_parts_full, fetch_last_used_project_id, assign_project_to_
 # ======================================================================
 @ui.page("/")
 def dashboard_page():
-    """Page principale : liste des pieces sous forme de cartes."""
-    # Applique la langue choisie par l'utilisateur AVANT de construire
-    # quoi que ce soit (les premiers appels a _() en dependent).
+    """Main page: list of parts as cards."""
+    # Apply the language chosen by the user BEFORE building anything
+    # (the first calls to _() depend on it).
     _apply_user_lang()
     _register_pwa()
-    # Premier demarrage : pas encore de mot de passe admin -> setup
+    # First startup: no admin password yet -> setup
     if not _admin_configured():
         _open_admin_setup_dialog()
-    # Titre de l'onglet navigateur (visible dans la barre + historique)
+    # Browser tab title (visible in the tab bar + history)
     ui.page_title(_("PiStock — Catalog"))
 
-    # JavaScript injecte au <head> de la page. Comme NiceGUI 3.x
-    # sanitise le contenu de ui.html() et RETIRE les attributs 'on*'
-    # (onchange, onclick...), on ne peut pas mettre onchange="..."
-    # inline. A la place : event delegation. Un seul listener attache
-    # au document detecte tous les change sur les inputs portant
-    # data-stock-upload="{part_id}" et fait l'upload.
+    # JavaScript injected into the page <head>. Since NiceGUI 3.x
+    # sanitizes the content of ui.html() and STRIPS the 'on*'
+    # attributes (onchange, onclick...), we cannot use inline
+    # onchange="...". Instead: event delegation. A single listener
+    # attached to the document detects all change events on inputs
+    # carrying data-stock-upload="{part_id}" and performs the upload.
     ui.add_head_html('''
         <script>
         // Garde-fou : n'installe les listeners qu'une seule fois
@@ -328,43 +328,43 @@ def dashboard_page():
         </script>
     ''')
 
-    # En-tete sombre, comme dans la version HTML
+    # Dark header, as in the HTML version
     render_app_header("PiStock — Catalog")
 
-    # Conteneur principal centre, largeur max
+    # Main centered container, max width
     with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-4"):
 
-        # Barre d'actions : filtre projet a gauche, boutons a droite
+        # Action bar: project filter on the left, buttons on the right
         with ui.row().classes("w-full items-center gap-2"):
             ui.label(_("Project:")).classes("text-sm text-gray-600")
-            # Le select est rempli dynamiquement (peut etre vide si
-            # aucun projet existe encore). Initialise vide ici, peuple
-            # par refresh_project_filter().
+            # The select is filled dynamically (may be empty if no
+            # project exists yet). Initialized empty here, populated
+            # by refresh_project_filter().
             project_filter = ui.select(
                 options={"": _("All projects")},
                 value="",
                 on_change=lambda _: refresh_list()
             ).classes("min-w-[200px]")
 
-            # Pousse les boutons a droite
+            # Push the buttons to the right
             ui.element("div").classes("flex-grow")
 
             ui.button(_("Project"), on_click=lambda: open_projects_dialog()) \
                 .props("color=primary outline").classes("text-base")
-            ui.button("BOMs", on_click=lambda: open_boms_dialog()) \
+            ui.button(_("BOMs"), on_click=lambda: open_boms_dialog()) \
                 .props("color=primary outline").classes("text-base")
-            ui.button("Plugins",
+            ui.button(_("Plugins"),
                        on_click=lambda: ui.navigate.to("/plugins")) \
                 .props("color=primary outline").classes("text-base")
             ui.button(_("+ New part"), on_click=lambda: open_new_part_dialog()) \
                 .props("color=primary").classes("text-base")
 
         def refresh_project_filter():
-            """Recharge les options du dropdown de filtre projet."""
+            """Reload the options of the project filter dropdown."""
             options = {"": _("All projects")}
             for proj in fetch_projects():
-                options[proj["code"]] = f"{proj['code']} — {proj['description'] or '(sans description)'}"
-            # Conserver la valeur actuelle si elle est encore valide
+                options[proj["code"]] = f"{proj['code']} — {proj['description'] or _('(no description)')}"
+            # Keep the current value if it is still valid
             current = project_filter.value
             project_filter.options = options
             if current not in options:
@@ -373,22 +373,21 @@ def dashboard_page():
 
         refresh_project_filter()
 
-        # Conteneur de la liste, rempli puis re-rempli par refresh_list()
+        # List container, filled then re-filled by refresh_list()
         list_container = ui.column().classes("w-full gap-3")
 
         def refresh_list():
-            """Vide puis re-rempli la liste depuis la base, en
-            appliquant le filtre projet s'il est selectionne."""
+            """Clear then re-fill the list from the database, applying
+            the project filter if one is selected."""
             list_container.clear()
             code = project_filter.value or None
             parts = fetch_parts_full(project_code=code)
 
             if not parts:
-                msg = ("Aucune pièce dans la base pour l'instant. "
-                       "Cliquez sur « + Nouvelle pièce » ou exportez-en "
-                       "une depuis FreeCAD.")
+                msg = _("No part in the database yet. "
+                        "Click « + New part » or export one from FreeCAD.")
                 if code:
-                    msg = f"Aucune pièce pour le projet '{code}'."
+                    msg = _("No part for project '{code}'.").format(code=code)
                 with list_container:
                     ui.label(msg) \
                         .classes("text-gray-500 text-center p-8")
@@ -398,21 +397,21 @@ def dashboard_page():
                 with list_container:
                     render_part_row(part, refresh_list)
 
-        # Premier remplissage
+        # First fill
         refresh_list()
 
-        # --- Dialogue "Nouvelle piece" --------------------------------
-        # Construit une fois, ouvert a la demande. NiceGUI permet de
-        # creer le dialogue ici et de l'afficher avec .open().
+        # --- "New part" dialog ----------------------------------------
+        # Built once, opened on demand. NiceGUI lets us create the
+        # dialog here and display it with .open().
         with ui.dialog() as new_part_dialog, ui.card().classes("min-w-[360px]"):
-            ui.label("Nouvelle pièce").classes("text-lg font-medium")
-            name_input = ui.input("Nom de la pièce", placeholder="ex: bracket-v2") \
+            ui.label(_("New part")).classes("text-lg font-medium")
+            name_input = ui.input(_("Part name"), placeholder=_("e.g.: bracket-v2")) \
                 .classes("w-full")
             error_label = ui.label("").classes("text-red-600 text-sm min-h-[1.2em]")
             with ui.row().classes("w-full justify-end gap-2 mt-2"):
-                ui.button("Annuler", on_click=new_part_dialog.close) \
+                ui.button(_("Cancel"), on_click=new_part_dialog.close) \
                     .props("flat")
-                ui.button("Créer",
+                ui.button(_("Create"),
                           on_click=lambda: confirm_create_part()) \
                     .props("color=primary")
 
@@ -426,7 +425,7 @@ def dashboard_page():
                 new_part_dialog.close()
                 refresh_list()
 
-            # Touche Entree dans le champ -> valide
+            # Enter key in the field -> submit
             name_input.on("keydown.enter", lambda _: confirm_create_part())
 
         def open_new_part_dialog():
@@ -434,67 +433,66 @@ def dashboard_page():
             error_label.text = ""
             new_part_dialog.open()
 
-        # --- Dialogue "Projets" ---------------------------------------
-        # Liste les projets existants + formulaire de creation inline
-        # (revelable). Le code (AAA, AAB...) est genere par le serveur,
-        # l'utilisateur saisit juste la description.
+        # --- "Projects" dialog ----------------------------------------
+        # Lists existing projects + inline creation form (revealable).
+        # The code (AAA, AAB...) is generated by the server, the user
+        # only enters the description.
         with ui.dialog() as projects_dialog, \
                 ui.card().classes("min-w-[480px] max-w-[600px]"):
-            ui.label("Projets").classes("text-lg font-medium")
+            ui.label(_("Projects")).classes("text-lg font-medium")
 
-            # Conteneur scrollable pour la liste des projets.
-            # Vide puis rempli par refresh_projects_list().
+            # Scrollable container for the list of projects.
+            # Cleared then filled by refresh_projects_list().
             projects_list_container = ui.column() \
                 .classes("w-full gap-2 max-h-[400px] overflow-y-auto")
 
-            # Formulaire de creation, masque par defaut.
+            # Creation form, hidden by default.
             with ui.column().classes("w-full gap-2 mt-2") as creation_form:
-                ui.label("Nouveau projet").classes("text-sm font-medium")
+                ui.label(_("New project")).classes("text-sm font-medium")
                 desc_input = ui.textarea(
-                    placeholder="Description (optionnelle)") \
+                    placeholder=_("Description (optional)")) \
                     .classes("w-full").props("autogrow rows=3")
                 proj_error = ui.label("") \
                     .classes("text-red-600 text-sm min-h-[1.2em]")
                 with ui.row().classes("w-full justify-end gap-2"):
-                    ui.button("Annuler",
+                    ui.button(_("Cancel"),
                               on_click=lambda: hide_creation_form()) \
                         .props("flat")
-                    ui.button("Créer",
+                    ui.button(_("Create"),
                               on_click=lambda: confirm_create_project()) \
                         .props("color=primary")
             creation_form.set_visibility(False)
 
-            # Boutons du pied : "+ Nouveau projet" + "Fermer"
+            # Footer buttons: "+ Nouveau projet" + "Fermer"
             with ui.row().classes("w-full justify-between gap-2 mt-2") \
                     as footer_row:
-                add_btn = ui.button("+ Nouveau projet",
+                add_btn = ui.button(_("+ New project"),
                                      on_click=lambda: show_creation_form()) \
                     .props("color=primary outline")
-                ui.button("Fermer", on_click=projects_dialog.close) \
+                ui.button(_("Close"), on_click=projects_dialog.close) \
                     .props("flat")
 
             def refresh_projects_list():
-                """Vide puis re-rempli la liste depuis la base."""
+                """Clear then re-fill the list from the database."""
                 projects_list_container.clear()
                 projects = fetch_projects()
                 if not projects:
                     with projects_list_container:
-                        ui.label("Aucun projet pour l'instant. "
-                                 "Cliquez sur « + Nouveau projet » "
-                                 "pour en créer un.") \
+                        ui.label(_("No project yet. "
+                                   "Click « + New project » to create one.")) \
                             .classes("text-gray-500 text-sm text-center p-4")
                     return
                 for proj in projects:
                     with projects_list_container:
                         with ui.card().classes("w-full p-3"):
                             with ui.row().classes("items-start gap-3 no-wrap"):
-                                # Code en grosse pastille
+                                # Code as a large badge
                                 ui.label(proj["code"]) \
                                     .classes("text-lg font-mono font-bold "
                                               "text-blue-700 bg-blue-50 "
                                               "px-2 py-1 rounded "
                                               "flex-shrink-0")
-                                # Description (ou italique si vide)
+                                # Description (or italic if empty)
                                 desc = proj["description"]
                                 if desc:
                                     ui.label(desc) \
@@ -502,10 +500,10 @@ def dashboard_page():
                                                   "whitespace-pre-wrap "
                                                   "flex-grow")
                                 else:
-                                    ui.label("(aucune description)") \
+                                    ui.label(_("(no description)")) \
                                         .classes("text-sm text-gray-400 "
                                                   "italic flex-grow")
-                                # Bouton suppression (admin + projet vide)
+                                # Delete button (admin + empty project)
                                 def _make_del(p=proj):
                                     def h():
                                         confirm_delete_project(
@@ -520,7 +518,7 @@ def dashboard_page():
                                     on_click=_make_del()) \
                                     .props("flat round dense color=grey-6") \
                                     .classes("flex-shrink-0") \
-                                    .tooltip("Supprimer ce projet")
+                                    .tooltip(_("Delete this project"))
 
             def show_creation_form():
                 desc_input.value = ""
@@ -541,34 +539,34 @@ def dashboard_page():
                 ui.notify(msg, type="positive")
                 hide_creation_form()
                 refresh_projects_list()
-                # Le dropdown de filtre doit aussi connaitre le nouveau projet
+                # The filter dropdown must also learn about the new project
                 refresh_project_filter()
 
         def open_projects_dialog():
-            # On rafraichit a chaque ouverture (au cas ou un autre
-            # onglet/utilisateur aurait ajoute des projets entre-temps).
+            # We refresh on every open (in case another tab/user has
+            # added projects in the meantime).
             hide_creation_form_silently()
             refresh_projects_list()
             projects_dialog.open()
 
         def hide_creation_form_silently():
-            """Reset l'etat du formulaire sans notification."""
+            """Reset the form state without notification."""
             creation_form.set_visibility(False)
             add_btn.set_visibility(True)
 
 
 # ======================================================================
-#  RENDU D'UNE LIGNE
+#  RENDERING A ROW
 # ======================================================================
 def render_part_row(part: dict, on_change):
-    """Rendu d'une ligne de piece. 'on_change' est appele apres une
-    action qui modifie la base (upload photo, changement de projet,
-    de statut, de verrou), pour rafraichir la liste."""
+    """Render a part row. 'on_change' is called after an action that
+    modifies the database (photo upload, project/status/lock change),
+    to refresh the list."""
 
     part_id = part["id"]
     locked = part["locked"]
 
-    # Couleurs du badge statut selon la valeur
+    # Status badge colors depending on the value
     status_colors = {
         "Init":  "bg-gray-100 text-gray-700",
         "Revue": "bg-amber-100 text-amber-800",
@@ -579,21 +577,23 @@ def render_part_row(part: dict, on_change):
     with ui.card().classes("w-full p-4"):
         with ui.row().classes("w-full items-center gap-3 no-wrap"):
 
-            # --- Verrou (icone cadenas, cliquable) ------------------
-            # Toggle au clic. Visuellement distinct selon l'etat.
+            # --- Lock (padlock icon, clickable) ---------------------
+            # Toggle on click. Visually distinct depending on the state.
             lock_icon = "lock" if locked else "lock_open"
             lock_color = "text-red-600" if locked else "text-gray-400"
 
             def make_toggle_lock(pid=part_id, is_locked=locked):
                 def do_toggle():
-                    ok, msg, _ = toggle_part_lock_db(pid)
+                    # NB: third element bound to a named var, not `_`,
+                    # which is the i18n translation function.
+                    ok, msg, _new_locked = toggle_part_lock_db(pid)
                     if ok:
                         ui.notify(msg, type="info")
                         on_change()
                     else:
                         ui.notify(msg, type="negative")
                 def handler():
-                    # Verrouiller : libre. Deverrouiller : admin requis.
+                    # Lock: unrestricted. Unlock: admin required.
                     if is_locked:
                         _ensure_admin(do_toggle)
                     else:
@@ -603,12 +603,12 @@ def render_part_row(part: dict, on_change):
             ui.button(icon=lock_icon, on_click=make_toggle_lock()) \
                 .props(f"flat round dense") \
                 .classes(f"{lock_color} flex-shrink-0") \
-                .tooltip("Verrouillée — cliquer pour déverrouiller"
-                          if locked else "Cliquer pour verrouiller")
+                .tooltip(_("Locked — click to unlock")
+                          if locked else _("Click to lock"))
 
-            # --- Bouton "⋯" -> dialogue d'options de la piece ------
-            # Point d'entree pour les actions moins frequentes :
-            # suppression, et plus tard renommage / duplication / etc.
+            # --- "⋯" button -> part options dialog -----------------
+            # Entry point for the less frequent actions: deletion, and
+            # later renaming / duplication / etc.
             def make_open_options(p=part):
                 def handler():
                     open_part_options_dialog(p, on_change)
@@ -616,9 +616,9 @@ def render_part_row(part: dict, on_change):
             ui.button(icon="more_horiz", on_click=make_open_options()) \
                 .props("flat round dense color=grey-7") \
                 .classes("flex-shrink-0") \
-                .tooltip("Options de la pièce")
+                .tooltip(_("Part options"))
 
-            # --- Nom + version (a cote) -----------------------------
+            # --- Name + version (side by side) ----------------------
             with ui.column().classes("gap-0 flex-grow"):
                 with ui.row().classes("items-baseline gap-2 no-wrap"):
                     ui.label(part["part_name"]) \
@@ -627,7 +627,7 @@ def render_part_row(part: dict, on_change):
                         ui.label(part["version"]) \
                             .classes("text-xs font-mono text-gray-500")
 
-                # --- Pastille projet (cliquable -> dialogue assign) -
+                # --- Project badge (clickable -> assign dialog) -----
                 with ui.row().classes("items-center gap-1 no-wrap mt-1"):
                     proj_code = part["project_code"]
                     if proj_code:
@@ -637,7 +637,7 @@ def render_part_row(part: dict, on_change):
                                       "px-2 py-0.5 rounded "
                                       "cursor-pointer hover:bg-blue-100")
                     else:
-                        proj_label = ui.label("aucun projet") \
+                        proj_label = ui.label(_("no project")) \
                             .classes("text-xs italic text-gray-400 "
                                       "px-2 py-0.5 rounded border "
                                       "border-dashed border-gray-300 "
@@ -646,18 +646,18 @@ def render_part_row(part: dict, on_change):
                     if not locked:
                         proj_label.on("click",
                                        lambda p=part: open_assign_project_dialog(p, on_change))
-                        proj_label.tooltip("Cliquer pour changer de projet")
+                        proj_label.tooltip(_("Click to change project"))
                     else:
                         proj_label.classes("opacity-60")
-                        proj_label.tooltip("Pièce verrouillée")
+                        proj_label.tooltip(_("Part locked"))
 
-                    # --- Badge statut (cliquable -> cycle) ----------
+                    # --- Status badge (clickable -> cycle) ----------
                     status_label = ui.label(part["status"]) \
                         .classes(f"text-xs font-semibold {status_cls} "
                                   f"px-2 py-0.5 rounded")
                     if not locked:
                         status_label.classes("cursor-pointer hover:brightness-95")
-                        # Cycle : Init -> Revue -> Asset -> Init
+                        # Cycle: Init -> Revue -> Asset -> Init
                         next_status = {"Init": "Revue",
                                         "Revue": "Asset",
                                         "Asset": "Init"}
@@ -673,11 +673,12 @@ def render_part_row(part: dict, on_change):
                             return handler
                         status_label.on("click", make_cycle())
                         status_label.tooltip(
-                            f"Cliquer → {next_status[part['status']]}")
+                            _("Click → {status}").format(
+                                status=next_status[part['status']]))
                     else:
                         status_label.classes("opacity-60")
 
-            # --- Vignette CAO (cliquable -> viewer 3D) -------------
+            # --- CAD thumbnail (clickable -> 3D viewer) ------------
             with ui.element("div").classes(
                     "w-20 h-20 bg-stone-100 rounded-lg flex items-center "
                     "justify-center overflow-hidden flex-shrink-0"):
@@ -688,15 +689,15 @@ def render_part_row(part: dict, on_change):
                         img.classes("cursor-pointer hover:scale-105 transition")
                         img.on("click",
                                lambda p=part: ui.navigate.to(f"/part/{p['id']}"))
-                        img.tooltip("Cliquer pour voir en 3D")
+                        img.tooltip(_("Click to view in 3D"))
                 else:
-                    ui.label("Pas de vignette") \
+                    ui.label(_("No thumbnail")) \
                         .classes("text-xs text-gray-400 text-center")
 
-            # --- Photo de stock + bouton ajout/remplacement --------
+            # --- Stock photo + add/replace button ------------------
             render_stock_photo_cell(part, on_change)
 
-            # --- Quantite ------------------------------------------
+            # --- Quantity ------------------------------------------
             qty = part["quantity"]
             qty_text = "—" if qty is None else str(qty)
             qty_color = "text-gray-300" if qty is None else "text-stone-800"
@@ -710,43 +711,45 @@ def render_part_row(part: dict, on_change):
             ui.label(loc_text) \
                 .classes(f"text-sm {loc_color} w-32 flex-shrink-0")
 
-            # --- Bouton stock (icone "inventory", a droite) --------
-            # Ouvre un dialogue d'edition (quantite, location, supply,
-            # fiche composant). Le verrou ne s'applique pas au stock.
+            # --- Stock button ("inventory" icon, on the right) -----
+            # Opens an edit dialog (quantity, location, supply,
+            # component datasheet). The lock does not apply to stock.
             def make_open_stock(p=part):
                 return lambda: open_stock_dialog(p, on_change)
             ui.button(icon="inventory_2",
                        on_click=make_open_stock()) \
                 .props("flat round dense color=primary") \
                 .classes("flex-shrink-0") \
-                .tooltip("Gérer le stock")
+                .tooltip(_("Manage stock"))
 
 
 def render_stock_photo_cell(part: dict, on_change):
-    """Cellule de la photo de stock : image + bouton "Remplacer", ou
-    gros bouton dashed "Ajouter" si pas encore de photo.
+    """Stock photo cell: image + "Replace" button, or a large dashed
+    "Add" button if there is no photo yet.
 
-    APPROCHE : on utilise du HTML pur via ui.html() avec un <label>
-    qui contient un <input type="file"> cache. Cliquer sur le label
-    declenche le file picker natif (comportement HTML standard, marche
-    partout). L'upload est ensuite poste via fetch() vers l'endpoint
-    REST /api/v1/parts/{id}/stock-photo. Cette approche est plus fiable
-    que ui.upload + pickFiles et permet un controle stylistique total.
-    Le JS 'uploadStockPhoto' est defini dans le <head> de la page."""
+    APPROACH: we use plain HTML via ui.html() with a <label> that
+    contains a hidden <input type="file">. Clicking the label triggers
+    the native file picker (standard HTML behavior, works everywhere).
+    The upload is then posted via fetch() to the REST endpoint
+    /api/v1/parts/{id}/stock-photo. This approach is more reliable than
+    ui.upload + pickFiles and allows full styling control. The JS
+    'uploadStockPhoto' is defined in the page <head>."""
 
     part_id = part["id"]
-    # 'on_change' n'est plus utilise ici : le rafraichissement se
-    # fait cote navigateur via window.location.reload() apres l'upload.
-    # On garde le parametre pour compatibilite avec l'appel existant.
-    _ = on_change
+    # 'on_change' is no longer used here: the refresh happens on the
+    # browser side via window.location.reload() after the upload.
+    # We keep the parameter for compatibility with the existing call.
+    # NB: do NOT rebind `_` to mark it unused — `_` is the i18n
+    # translation function used in the f-strings below.
+    del on_change
 
     if part["stock_img_url"]:
-        # Photo existante : 📁 (file) ou 📷 (camera) à droite
+        # Existing photo: 📁 (file) or 📷 (camera) on the right
         ui.html(f'''
             <div class="flex flex-col items-center gap-1 flex-shrink-0">
                 <div class="w-20 h-20 bg-stone-100 rounded-lg flex items-center justify-center overflow-hidden">
                     <img src="{part["stock_img_url"]}"
-                         alt="Photo stock"
+                         alt="{_("Stock photo")}"
                          class="w-full h-full object-contain">
                 </div>
                 <div class="flex gap-2 text-xs">
@@ -757,44 +760,44 @@ def render_stock_photo_cell(part: dict, on_change):
                     </label>
                     <a class="text-blue-600 cursor-pointer hover:underline"
                        data-pistock-capture="{part_id}"
-                       title="Prendre une photo">📷</a>
+                       title="{_("Take a photo")}">📷</a>
                 </div>
             </div>
         ''')
     else:
-        # Pas de photo : gros bouton pour fichier + petit lien camera
+        # No photo: large button for a file + small camera link
         ui.html(f'''
             <div class="flex flex-col items-center gap-1 flex-shrink-0">
-                <label class="cursor-pointer" title="Ajouter une photo de la pièce en stock">
+                <label class="cursor-pointer" title="{_("Add a photo of the part in stock")}">
                     <div class="w-20 h-20 border-2 border-dashed border-stone-300 rounded-lg
                                 flex flex-col items-center justify-center gap-0
                                 text-stone-500 transition
                                 hover:border-blue-500 hover:text-blue-500 hover:bg-blue-50">
                         <span class="text-2xl leading-none">📁</span>
-                        <span class="text-xs mt-1">Fichier</span>
+                        <span class="text-xs mt-1">{_("File")}</span>
                     </div>
                     <input type="file" accept="image/*" style="display:none"
                            data-stock-upload="{part_id}">
                 </label>
                 <a class="text-xs text-blue-600 cursor-pointer hover:underline"
                    data-pistock-capture="{part_id}"
-                   title="Prendre une photo avec la caméra">📷 Caméra</a>
+                   title="{_("Take a photo with the camera")}">📷 {_("Camera")}</a>
             </div>
         ''')
 
 
 # ======================================================================
-#  PAGE : VIEWER 3D
+#  PAGE: 3D VIEWER
 # ======================================================================
 def open_part_options_dialog(part: dict, on_change):
-    """Dialogue d'options pour une piece donnee. Contient les actions
-    moins frequentes que la simple modification (suppression, et plus
-    tard renommage, duplication, etc.). Le verrou n'empeche PAS
-    d'acceder a ce dialogue, mais empeche la suppression d'une piece
-    verrouillee (le bouton est grise dans ce cas)."""
+    """Options dialog for a given part. Contains the actions that are
+    less frequent than simple modification (deletion, and later
+    renaming, duplication, etc.). The lock does NOT prevent access to
+    this dialog, but prevents the deletion of a locked part (the button
+    is grayed out in that case)."""
     with ui.dialog() as dialog, ui.card().classes("min-w-[440px]"):
-        # En-tete : nom + code projet + statut
-        ui.label("Options de la pièce") \
+        # Header: name + project code + status
+        ui.label(_("Part options")) \
             .classes("text-base font-medium text-gray-600")
         with ui.row().classes("items-center gap-2"):
             ui.label(part["part_name"]) \
@@ -804,67 +807,67 @@ def open_part_options_dialog(part: dict, on_change):
                     .classes("text-xs font-mono text-gray-500")
         meta_bits = []
         if part.get("project_code"):
-            meta_bits.append(f"projet {part['project_code']}")
+            meta_bits.append(_("project {code}").format(code=part['project_code']))
         if part.get("status"):
-            meta_bits.append(f"statut « {part['status']} »")
+            meta_bits.append(_("status « {status} »").format(status=part['status']))
         if part.get("locked"):
-            meta_bits.append("🔒 verrouillée")
+            meta_bits.append(_("🔒 locked"))
         if meta_bits:
             ui.label(" • ".join(meta_bits)) \
                 .classes("text-xs text-gray-500")
 
         ui.separator()
 
-        # --- Section "Zone dangereuse" : suppression ----------------
-        # On garde la suppression isolee visuellement (couleur rouge,
-        # alignee a droite) pour eviter les clics accidentels.
+        # --- "Danger zone" section: deletion ------------------------
+        # We keep deletion visually isolated (red color, right-aligned)
+        # to avoid accidental clicks.
         with ui.column().classes("w-full gap-2 mt-2"):
-            ui.label("⚠️ Zone dangereuse") \
+            ui.label(_("⚠️ Danger zone")) \
                 .classes("text-sm font-medium text-red-600")
-            ui.label("La suppression d'une pièce efface définitivement "
-                     "ses révisions PLM, son stock et ses fichiers "
-                     "associés. Action irréversible.") \
+            ui.label(_("Deleting a part permanently erases its PLM "
+                       "revisions, its stock and its associated files. "
+                       "Irreversible action.")) \
                 .classes("text-xs text-gray-600")
 
             def on_delete():
-                # Lance la confirmation. Si OK, l'autre dialog se chargera
-                # de l'appel API + de la notification + du refresh.
+                # Launch the confirmation. If OK, the other dialog will
+                # handle the API call + the notification + the refresh.
                 dialog.close()
                 confirm_delete_part(part, on_change)
 
-            ui.button("🗑 Supprimer définitivement cette pièce…",
+            ui.button(_("🗑 Permanently delete this part…"),
                        on_click=on_delete) \
                 .props("color=negative outline") \
                 .classes("self-end")
 
-        # --- Bouton fermer ------------------------------------------
+        # --- Close button -------------------------------------------
         with ui.row().classes("w-full justify-end mt-2"):
-            ui.button("Fermer", on_click=dialog.close).props("flat")
+            ui.button(_("Close"), on_click=dialog.close).props("flat")
 
     dialog.open()
 
 
 def confirm_delete_part(part: dict, on_change):
-    # Garde admin : on ouvre le vrai dialogue seulement apres login.
+    # Admin guard: we open the real dialog only after login.
     return _ensure_admin(lambda: _confirm_delete_part_inner(part, on_change))
 
 def _confirm_delete_part_inner(part: dict, on_change):
-    """Dialogue de confirmation finale pour la suppression d'une piece.
-    Affiche le nom en gras et un avertissement. Au confirmation :
-    appelle delete_part_db ; si refus pour cause de BOMs, affiche
-    la liste exhaustive en notification dedans le dialog."""
+    """Final confirmation dialog for deleting a part. Displays the name
+    in bold and a warning. On confirmation: calls delete_part_db; if it
+    is refused because of BOMs, displays the full list as a notification
+    inside the dialog."""
     with ui.dialog() as dialog, ui.card().classes("min-w-[440px]"):
-        ui.label("Confirmer la suppression") \
+        ui.label(_("Confirm deletion")) \
             .classes("text-lg font-bold")
-        ui.label(f"Vous êtes sur le point de supprimer définitivement "
-                  f"la pièce « {part['part_name']} ».") \
+        ui.label(_("You are about to permanently delete "
+                   "the part « {name} ».").format(name=part['part_name'])) \
             .classes("text-sm")
-        ui.label("Toutes ses révisions PLM, son stock et ses fichiers "
-                 "associés seront effacés. Cette opération est "
-                 "irréversible.") \
+        ui.label(_("All its PLM revisions, its stock and its associated "
+                   "files will be erased. This operation is "
+                   "irreversible.")) \
             .classes("text-sm text-gray-600")
 
-        # Zone d'erreur qui sera remplie si la pièce est dans une BOM
+        # Error area that will be filled if the part is in a BOM
         error_area = ui.column().classes("w-full gap-1")
 
         def do_delete():
@@ -875,9 +878,9 @@ def _confirm_delete_part_inner(part: dict, on_change):
                 dialog.close()
                 on_change()
                 return
-            # Echec : si c'est a cause d'une BOM, on affiche la liste
-            # directement dans le dialog (pas de toast pour pouvoir
-            # lire posement).
+            # Failure: if it is because of a BOM, we display the list
+            # directly in the dialog (no toast, so it can be read
+            # calmly).
             if blocking:
                 with error_area:
                     with ui.card().classes(
@@ -885,7 +888,7 @@ def _confirm_delete_part_inner(part: dict, on_change):
                             "border-red-400 p-3 mt-2"):
                         ui.label(msg).classes("text-sm font-medium "
                                                 "text-red-700")
-                        ui.label("BOMs concernées :") \
+                        ui.label(_("BOMs concerned:")) \
                             .classes("text-xs text-red-600 mt-1")
                         for b in blocking:
                             line = f"  • {b['code']}"
@@ -894,15 +897,15 @@ def _confirm_delete_part_inner(part: dict, on_change):
                             ui.label(line) \
                                 .classes("text-xs font-mono "
                                           "text-red-600")
-                        ui.label("Retirez la pièce de ces BOMs "
-                                 "d'abord, puis réessayez.") \
+                        ui.label(_("Remove the part from these BOMs "
+                                   "first, then try again.")) \
                             .classes("text-xs text-gray-600 mt-1")
             else:
                 ui.notify(msg, type="negative")
 
         with ui.row().classes("w-full justify-end gap-2 mt-3"):
-            ui.button("Annuler", on_click=dialog.close).props("flat")
-            ui.button("Supprimer définitivement",
+            ui.button(_("Cancel"), on_click=dialog.close).props("flat")
+            ui.button(_("Permanently delete"),
                        on_click=do_delete) \
                 .props("color=negative")
 
@@ -910,7 +913,7 @@ def _confirm_delete_part_inner(part: dict, on_change):
 
 
 # ======================================================================
-#  DIALOGUE : ASSIGNATION DE PROJET
+#  DIALOG: PROJECT ASSIGNMENT
 # ======================================================================
 def open_assign_project_dialog(part: dict, on_change):
     projects = fetch_projects()
@@ -919,57 +922,57 @@ def open_assign_project_dialog(part: dict, on_change):
     part_id = part["id"]
     part_name = part["part_name"]
 
-    # Construit le dialogue. On le ferme et le detruit apres usage
-    # pour eviter d'accumuler des dialogues a chaque ouverture.
+    # Build the dialog. We close and destroy it after use to avoid
+    # accumulating dialogs on every open.
     with ui.dialog() as dialog, ui.card().classes("min-w-[440px] max-w-[600px]"):
-        ui.label(f"Assigner un projet à « {part_name} »") \
+        ui.label(_("Assign a project to « {name} »").format(name=part_name)) \
             .classes("text-lg font-medium")
 
         list_container = ui.column() \
             .classes("w-full gap-2 max-h-[360px] overflow-y-auto")
 
-        # Formulaire de creation de projet, masque par defaut
+        # Project creation form, hidden by default
         with ui.column().classes("w-full gap-2 mt-2") as creation_form:
-            ui.label("Nouveau projet").classes("text-sm font-medium")
+            ui.label(_("New project")).classes("text-sm font-medium")
             desc_input = ui.textarea(
-                placeholder="Description (optionnelle)") \
+                placeholder=_("Description (optional)")) \
                 .classes("w-full").props("autogrow rows=2")
             err_label = ui.label("") \
                 .classes("text-red-600 text-sm min-h-[1.2em]")
             with ui.row().classes("w-full justify-end gap-2"):
-                ui.button("Annuler",
+                ui.button(_("Cancel"),
                           on_click=lambda: hide_creation()) \
                     .props("flat")
-                ui.button("Créer et assigner",
+                ui.button(_("Create and assign"),
                           on_click=lambda: confirm_create_and_assign()) \
                     .props("color=primary")
         creation_form.set_visibility(False)
 
-        # Pied : "+ Nouveau projet" / Dissocier / Fermer
+        # Footer: "+ Nouveau projet" / Dissocier / Fermer
         with ui.row().classes("w-full justify-between gap-2 mt-2"):
-            add_btn = ui.button("+ Nouveau projet",
+            add_btn = ui.button(_("+ New project"),
                                  on_click=lambda: show_creation()) \
                 .props("color=primary outline")
             with ui.row().classes("gap-2"):
                 if current_id is not None:
-                    ui.button("Dissocier",
+                    ui.button(_("Unassign"),
                               on_click=lambda: do_assign(None)) \
                         .props("flat color=negative")
-                ui.button("Fermer", on_click=dialog.close).props("flat")
+                ui.button(_("Close"), on_click=dialog.close).props("flat")
 
         def render_options():
             list_container.clear()
             if not projects:
                 with list_container:
-                    ui.label("Aucun projet pour l'instant. "
-                             "Créez-en un avec « + Nouveau projet ».") \
+                    ui.label(_("No project yet. "
+                               "Create one with « + New project ».")) \
                         .classes("text-gray-500 text-sm text-center p-4")
                 return
             for proj in projects:
                 with list_container:
                     is_current = (proj["id"] == current_id)
                     is_last = (proj["id"] == last_used_id and not is_current)
-                    # Bordure speciale si projet courant ou dernier utilise
+                    # Special border if current project or last used
                     extra = ""
                     if is_current:
                         extra = " border-2 border-blue-500"
@@ -984,17 +987,17 @@ def open_assign_project_dialog(part: dict, on_change):
                                           "text-blue-700 bg-blue-50 "
                                           "px-2 py-1 rounded flex-shrink-0")
                             with ui.column().classes("gap-0 flex-grow"):
-                                desc = proj["description"] or "(aucune description)"
+                                desc = proj["description"] or _("(no description)")
                                 ui.label(desc) \
                                     .classes("text-sm text-stone-700 "
                                               "whitespace-pre-wrap")
                                 if is_current:
-                                    ui.label("Projet actuel") \
+                                    ui.label(_("Current project")) \
                                         .classes("text-xs text-blue-600 font-medium")
                                 elif is_last:
-                                    ui.label("Dernier utilisé") \
+                                    ui.label(_("Last used")) \
                                         .classes("text-xs text-amber-600")
-                    # Clic sur la carte = assigner
+                    # Click on the card = assign
                     card.on("click", lambda pid=proj["id"]: do_assign(pid))
 
         def do_assign(project_id):
@@ -1017,13 +1020,13 @@ def open_assign_project_dialog(part: dict, on_change):
             add_btn.set_visibility(True)
 
         def confirm_create_and_assign():
-            # Cree le projet puis l'assigne immediatement a la piece
+            # Create the project then assign it to the part immediately
             ok, msg, code = create_project_in_db(desc_input.value or "")
             if not ok:
                 err_label.text = msg
                 return
-            # Le projet vient d'etre cree : on retrouve son id en
-            # cherchant par code (unique).
+            # The project has just been created: we find its id by
+            # searching by code (unique).
             import main
             with Session(main.engine) as s:
                 proj = s.exec(
@@ -1031,11 +1034,11 @@ def open_assign_project_dialog(part: dict, on_change):
                 ).first()
                 new_id = proj.id if proj else None
             if new_id is None:
-                err_label.text = "Projet créé mais introuvable, abandon."
+                err_label.text = _("Project created but not found, aborting.")
                 return
             ok2, msg2 = assign_project_to_part(part_id, new_id)
             if ok2:
-                ui.notify(f"Projet {code} créé et assigné.",
+                ui.notify(_("Project {code} created and assigned.").format(code=code),
                           type="positive")
                 dialog.close()
                 on_change()
@@ -1047,52 +1050,52 @@ def open_assign_project_dialog(part: dict, on_change):
 
 
 # ======================================================================
-#  DIALOGUE : EDITION DU STOCK D'UNE PIECE
+#  DIALOG: EDITING A PART'S STOCK
 # ======================================================================
-# Ouvre un dialogue avec : quantite (number), location (input), supply
-# (textarea), et un bouton d'upload de fiche composant. La fiche
-# uploadee va dans /data-pistock/uploads/doc/ via l'endpoint REST
-# /api/v1/parts/{id}/stock-doc (cf. JS listener "data-stock-doc").
+# Opens a dialog with: quantity (number), location (input), supply
+# (textarea), and a button to upload a component datasheet. The
+# uploaded datasheet goes into /data-pistock/uploads/doc/ via the REST
+# endpoint /api/v1/parts/{id}/stock-doc (see the JS listener
+# "data-stock-doc").
 def open_stock_dialog(part: dict, on_change):
     part_id = part["id"]
     part_name = part["part_name"]
-    # Etat courant lu depuis la base (le 'part' passe peut etre stale
-    # si le user a modifie le stock dans un autre onglet).
+    # Current state read from the database (the 'part' passed in may be
+    # stale if the user has modified the stock in another tab).
     stock = fetch_stock(part_id)
 
     with ui.dialog() as dialog, ui.card().classes("min-w-[480px] max-w-[600px]"):
-        ui.label(f"Stock — « {part_name} »") \
+        ui.label(_("Stock — « {name} »").format(name=part_name)) \
             .classes("text-lg font-medium")
 
-        # --- Champs editables -----------------------------------------
-        qty_input = ui.number(label="Quantité",
+        # --- Editable fields ------------------------------------------
+        qty_input = ui.number(label=_("Quantity"),
                                value=stock["quantity"] or 0,
                                min=0, step=1, format="%d") \
             .classes("w-full")
-        loc_input = ui.input(label="Location",
+        loc_input = ui.input(label=_("Location"),
                               value=stock["location"] or "",
-                              placeholder="ex: Tiroir A3, étagère 2") \
+                              placeholder=_("e.g.: Drawer A3, shelf 2")) \
             .classes("w-full")
         supply_input = ui.textarea(
-                label="Supply",
+                label=_("Supply"),
                 value=stock["supply"] or "",
-                placeholder="URL d'approvisionnement, fournisseur, "
-                            "notes...") \
+                placeholder=_("Supply URL, supplier, notes...")) \
             .classes("w-full").props("autogrow rows=3")
 
-        # --- Fiche composant -----------------------------------------
-        # Si une fiche existe deja, on affiche un lien pour la
-        # consulter. Le bouton "Choisir un fichier" ouvre le file
-        # picker et l'upload se declenche automatiquement via le
-        # listener JS global (data-stock-doc).
+        # --- Component datasheet -------------------------------------
+        # If a datasheet already exists, we display a link to view it.
+        # The "Choisir un fichier" button opens the file picker and the
+        # upload is triggered automatically via the global JS listener
+        # (data-stock-doc).
         with ui.column().classes("w-full mt-2"):
-            ui.label("Fiche composant").classes("text-sm text-gray-600")
+            ui.label(_("Component datasheet")).classes("text-sm text-gray-600")
             doc_url = stock["doc_url"]
             if doc_url:
-                # Lien vers la fiche actuelle (extrait juste le nom
-                # affiche en retirant le repertoire et le prefixe).
+                # Link to the current datasheet (extract just the
+                # displayed name by removing the directory and prefix).
                 doc_name = doc_url.split("/")[-1]
-                # On retire le suffixe _YYYYMMDD_HHMMSS pour l'affichage
+                # Remove the _YYYYMMDD_HHMMSS suffix for display
                 import re
                 display_name = re.sub(r"_\d{8}_\d{6}", "", doc_name)
                 with ui.row().classes("items-center gap-2"):
@@ -1101,15 +1104,15 @@ def open_stock_dialog(part: dict, on_change):
                         f'class="text-blue-600 hover:underline text-sm">'
                         f'📄 {display_name}</a>'
                     )
-                replace_label_text = "Remplacer la fiche"
+                replace_label_text = _("Replace the datasheet")
             else:
-                ui.label("(aucune fiche enregistrée)") \
+                ui.label(_("(no datasheet saved)")) \
                     .classes("text-sm text-gray-400 italic")
-                replace_label_text = "Choisir un fichier"
+                replace_label_text = _("Choose a file")
 
-            # Bouton d'upload : meme approche que pour les photos de
-            # stock (HTML <label> + input cache, intercepte par le
-            # listener JS global).
+            # Upload button: same approach as for the stock photos
+            # (HTML <label> + hidden input, intercepted by the global
+            # JS listener).
             ui.html(f'''
                 <label class="inline-flex items-center gap-2 cursor-pointer
                               text-blue-600 hover:underline text-sm mt-1">
@@ -1121,10 +1124,10 @@ def open_stock_dialog(part: dict, on_change):
                 </label>
             ''')
 
-        # --- Boutons OK / Annuler ------------------------------------
+        # --- OK / Cancel buttons -------------------------------------
         with ui.row().classes("w-full justify-end gap-2 mt-3"):
-            ui.button("Annuler", on_click=dialog.close).props("flat")
-            ui.button("Enregistrer",
+            ui.button(_("Cancel"), on_click=dialog.close).props("flat")
+            ui.button(_("Save"),
                       on_click=lambda: confirm_save()) \
                 .props("color=primary")
 
@@ -1146,30 +1149,30 @@ def open_stock_dialog(part: dict, on_change):
 
 
 # ======================================================================
-#  DIALOGUE : LISTE DES BOMs (+ création + actions stock)
+#  DIALOG: LIST OF BOMs (+ creation + stock actions)
 # ======================================================================
 def open_boms_dialog():
-    """Dialogue principal des BOMs : liste, création, et actions de
-    stock (ajouter/retirer N fois). Cliquer sur une ligne ouvre le
-    sous-dialogue d'édition des lignes de la BOM."""
+    """Main BOM dialog: list, creation, and stock actions (add/remove
+    N times). Clicking a row opens the sub-dialog for editing the BOM
+    lines."""
 
     with ui.dialog() as dialog, ui.card().classes("min-w-[760px] max-w-[900px]"):
-        ui.label("BOMs (nomenclatures)").classes("text-lg font-medium")
+        ui.label(_("BOMs (bills of materials)")).classes("text-lg font-medium")
 
         list_container = ui.column() \
             .classes("w-full gap-2 max-h-[420px] overflow-y-auto")
 
-        # --- Formulaire de création (masqué par défaut) ---------------
+        # --- Creation form (hidden by default) ------------------------
         with ui.column().classes("w-full gap-2 mt-2") as creation_form:
-            ui.label("Nouvelle BOM").classes("text-sm font-medium")
+            ui.label(_("New BOM")).classes("text-sm font-medium")
             desc_input = ui.textarea(
-                placeholder="Description (optionnelle)") \
+                placeholder=_("Description (optional)")) \
                 .classes("w-full").props("autogrow rows=2")
-            # Sélecteur projet (optionnel) : permet de rattacher la
-            # BOM à un projet existant directement à la création.
+            # Project selector (optional): allows attaching the BOM to
+            # an existing project directly at creation time.
             project_select = ui.select(
-                options={0: "(Sans projet)"},  # peuplé dans render()
-                value=0, label="Projet (optionnel)"
+                options={0: _("(No project)")},  # populated in render()
+                value=0, label=_("Project (optional)")
             ).classes("w-full")
             err_label = ui.label("") \
                 .classes("text-red-600 text-sm min-h-[1.2em]")
@@ -1182,9 +1185,9 @@ def open_boms_dialog():
                     .props("color=primary")
         creation_form.set_visibility(False)
 
-        # --- Pied : "+ Nouvelle BOM" et "Fermer" ---------------------
+        # --- Footer: "+ Nouvelle BOM" and "Fermer" -------------------
         with ui.row().classes("w-full justify-between gap-2 mt-2"):
-            add_btn = ui.button("+ Nouvelle BOM",
+            add_btn = ui.button(_("+ New BOM"),
                                  on_click=lambda: show_creation()) \
                 .props("color=primary outline")
             ui.button(_("Close"), on_click=dialog.close).props("flat")
@@ -1193,8 +1196,8 @@ def open_boms_dialog():
             desc_input.value = ""
             project_select.value = 0
             err_label.text = ""
-            # Recharge la liste des projets dans le selecteur
-            options = {0: "(Sans projet)"}
+            # Reload the list of projects in the selector
+            options = {0: _("(No project)")}
             for proj in fetch_projects():
                 options[proj["id"]] = f"{proj['code']} — {(proj['description'] or '')[:30]}"
             project_select.options = options
@@ -1223,8 +1226,7 @@ def open_boms_dialog():
             boms = fetch_boms()
             if not boms:
                 with list_container:
-                    ui.label("Aucune BOM. Cliquez sur « + Nouvelle BOM »"
-                             " pour en créer une.") \
+                    ui.label(_("No BOM. Click « + New BOM » to create one.")) \
                         .classes("text-gray-500 text-sm text-center p-4")
                 return
             for bom in boms:
@@ -1239,16 +1241,16 @@ def open_boms_dialog():
                         .classes("text-sm font-mono font-bold "
                                   "text-blue-700 bg-blue-50 "
                                   "px-2 py-1 rounded flex-shrink-0")
-                    # Description + projet
+                    # Description + project
                     with ui.column().classes("gap-0 flex-grow"):
-                        desc = bom["description"] or "(sans description)"
+                        desc = bom["description"] or _("(no description)")
                         ui.label(desc).classes("text-sm font-medium")
-                        meta = f"{bom['line_count']} ligne(s)"
+                        meta = _("{count} line(s)").format(count=bom['line_count'])
                         if bom["project_code"]:
-                            meta += f" • projet {bom['project_code']}"
+                            meta += _(" • project {code}").format(code=bom['project_code'])
                         ui.label(meta).classes("text-xs text-gray-500")
 
-                    # Bouton "Éditer"
+                    # "Éditer" button
                     def make_edit(bid=bom["id"]):
                         def handler():
                             dialog.close()
@@ -1256,9 +1258,9 @@ def open_boms_dialog():
                         return handler
                     ui.button(icon="edit", on_click=make_edit()) \
                         .props("flat round dense color=primary") \
-                        .tooltip("Éditer les lignes")
+                        .tooltip(_("Edit the lines"))
 
-                    # Stock +/- (avec mini-prompt pour le facteur)
+                    # Stock +/- (with a mini-prompt for the factor)
                     def make_stock_apply(bid=bom["id"],
                                           direction="add"):
                         def handler():
@@ -1268,13 +1270,13 @@ def open_boms_dialog():
                     ui.button(icon="add", on_click=make_stock_apply(
                                 bid=bom["id"], direction="add")) \
                         .props("flat round dense color=positive") \
-                        .tooltip("Ajouter au stock")
+                        .tooltip(_("Add to stock"))
                     ui.button(icon="remove", on_click=make_stock_apply(
                                 bid=bom["id"], direction="sub")) \
                         .props("flat round dense color=warning") \
-                        .tooltip("Retirer du stock")
+                        .tooltip(_("Remove from stock"))
 
-                    # Suppression (avec confirmation)
+                    # Deletion (with confirmation)
                     def make_delete(bid=bom["id"], code=bom["code"]):
                         def handler():
                             confirm_delete_bom(bid, code,
@@ -1282,7 +1284,7 @@ def open_boms_dialog():
                         return handler
                     ui.button(icon="delete", on_click=make_delete()) \
                         .props("flat round dense color=negative") \
-                        .tooltip("Supprimer cette BOM")
+                        .tooltip(_("Delete this BOM"))
 
         render_boms_list()
         dialog.open()
@@ -1292,12 +1294,12 @@ def confirm_delete_bom(bom_id: int, code: str, on_done):
     return _ensure_admin(lambda: _confirm_delete_bom_inner(bom_id, code, on_done))
 
 def _confirm_delete_bom_inner(bom_id: int, code: str, on_done):
-    """Dialogue de confirmation pour la suppression d'une BOM."""
+    """Confirmation dialog for deleting a BOM."""
     with ui.dialog() as d, ui.card():
-        ui.label(f"Supprimer la BOM « {code} » ?") \
+        ui.label(_("Delete BOM « {code} »?").format(code=code)) \
             .classes("text-base font-medium")
-        ui.label("Cette action supprime aussi toutes ses lignes. "
-                  "Le stock des pièces n'est PAS modifié.") \
+        ui.label(_("This action also deletes all its lines. "
+                   "The stock of the parts is NOT modified.")) \
             .classes("text-sm text-gray-600 max-w-[400px]")
         with ui.row().classes("w-full justify-end gap-2 mt-2"):
             ui.button(_("Cancel"), on_click=d.close).props("flat")
@@ -1313,42 +1315,42 @@ def _confirm_delete_bom_inner(bom_id: int, code: str, on_done):
 
 
 def open_bom_stock_dialog(bom_id: int, direction: str, on_done):
-    """Mini-dialogue qui demande le facteur (combien de fois appliquer
-    la BOM) puis applique. direction='add' ou 'sub'."""
+    """Mini-dialog that asks for the factor (how many times to apply
+    the BOM) then applies it. direction='add' or 'sub'."""
     is_add = (direction == "add")
-    title = "Ajouter au stock" if is_add else "Retirer du stock"
+    title = _("Add to stock") if is_add else _("Remove from stock")
     verb_color = "positive" if is_add else "warning"
 
     detail = fetch_bom_detail(bom_id)
     if detail is None:
-        ui.notify("BOM introuvable.", type="negative")
+        ui.notify(_("BOM not found."), type="negative")
         return
     if not detail["lines"]:
-        ui.notify("Cette BOM est vide.", type="warning")
+        ui.notify(_("This BOM is empty."), type="warning")
         return
 
     with ui.dialog() as d, ui.card().classes("min-w-[440px]"):
-        ui.label(f"{title} — BOM {detail['code']}") \
+        ui.label(_("{title} — BOM {code}").format(title=title, code=detail['code'])) \
             .classes("text-lg font-medium")
-        ui.label("Combien de fois ?").classes("text-sm text-gray-600")
+        ui.label(_("How many times?")).classes("text-sm text-gray-600")
         factor_input = ui.number(value=1, min=1, step=1, format="%d") \
             .classes("w-full")
-        # Récap des changements à venir : on affiche les TOTAUX par
-        # piece feuille apres aplatissement de la hierarchie (recursion
-        # via _flatten_bom). C'est ce qui sera vraiment applique au stock.
-        ui.label("Conséquences sur le stock (pièces feuilles) :") \
+        # Recap of the upcoming changes: we display the TOTALS per leaf
+        # part after flattening the hierarchy (recursion via
+        # _flatten_bom). This is what will actually be applied to the stock.
+        ui.label(_("Effects on stock (leaf parts):")) \
             .classes("text-sm font-medium mt-2")
         recap = ui.column().classes("gap-1")
         def refresh_recap():
             recap.clear()
             f = int(factor_input.value or 1)
             sign = "+" if is_add else "−"
-            # Calcul via le flatten serveur
+            # Computation via the server-side flatten
             import main
             with Session(main.engine) as session:
                 try:
                     totals = main._flatten_bom(session, bom_id, factor=f)
-                    # Pre-charge les noms de pieces pour l'affichage
+                    # Pre-load the part names for display
                     parts_by_id = {
                         p.id: p.part_name for p in session.exec(
                             select(main.Parts)
@@ -1357,12 +1359,12 @@ def open_bom_stock_dialog(bom_id: int, direction: str, on_done):
                     } if totals else {}
                 except Exception as e:
                     with recap:
-                        ui.label(f"⚠️  Erreur : {e}") \
+                        ui.label(_("⚠️  Error: {error}").format(error=e)) \
                             .classes("text-xs text-red-600")
                     return
             with recap:
                 if not totals:
-                    ui.label("(BOM vide)").classes("text-xs text-gray-500")
+                    ui.label(_("(empty BOM)")).classes("text-xs text-gray-500")
                 else:
                     for pid, delta in totals.items():
                         name = parts_by_id.get(pid, f"#{pid}")
@@ -1377,9 +1379,11 @@ def open_bom_stock_dialog(bom_id: int, direction: str, on_done):
                 f = int(factor_input.value or 1)
                 ok, msg, shortages = bom_stock_apply(bom_id, f, direction)
                 if not ok and shortages:
-                    # Construit un message detaille des manques
-                    lines = [f"  • {s['part_name']} : besoin {s['needed']}, "
-                             f"dispo {s['available']} (manque {s['missing']})"
+                    # Build a detailed message of the shortages
+                    lines = [_("  • {name} : need {needed}, "
+                               "available {available} (missing {missing})").format(
+                                   name=s['part_name'], needed=s['needed'],
+                                   available=s['available'], missing=s['missing'])
                              for s in shortages]
                     full_msg = f"{msg}\n" + "\n".join(lines)
                     ui.notify(full_msg, type="negative",
@@ -1395,37 +1399,37 @@ def open_bom_stock_dialog(bom_id: int, direction: str, on_done):
 
 
 # ======================================================================
-#  DIALOGUE : ÉDITION DES LIGNES D'UNE BOM
+#  DIALOG: EDITING THE LINES OF A BOM
 # ======================================================================
 def open_bom_edit_dialog(bom_id: int):
-    """Dialogue d'édition des lignes d'une BOM : ajouter, modifier
-    quantité (inline), supprimer."""
+    """Dialog for editing the lines of a BOM: add, modify quantity
+    (inline), delete."""
     detail = fetch_bom_detail(bom_id)
     if detail is None:
-        ui.notify("BOM introuvable.", type="negative")
+        ui.notify(_("BOM not found."), type="negative")
         return
 
-    # Charger toutes les pieces pour le selecteur d'ajout
+    # Load all parts for the add selector
     parts = fetch_parts_full()
 
     with ui.dialog() as dialog, ui.card().classes("min-w-[640px] max-w-[800px]"):
-        # En-tête : code + description
-        header_text = f"BOM {detail['code']}"
+        # Header: code + description
+        header_text = _("BOM {code}").format(code=detail['code'])
         if detail["description"]:
             header_text += f" — {detail['description']}"
         ui.label(header_text).classes("text-lg font-medium")
 
-        # Liste des lignes
+        # List of lines
         lines_container = ui.column().classes("w-full gap-1")
 
         def render_lines():
-            """Recharge les données et redessine les lignes."""
+            """Reload the data and redraw the lines."""
             nonlocal detail
             detail = fetch_bom_detail(bom_id)
             lines_container.clear()
             if not detail["lines"]:
                 with lines_container:
-                    ui.label("Aucune ligne. Ajoutez une pièce ci-dessous.") \
+                    ui.label(_("No line. Add a part below.")) \
                         .classes("text-gray-500 text-sm text-center p-3")
                 return
             for line in detail["lines"]:
@@ -1435,13 +1439,13 @@ def open_bom_edit_dialog(bom_id: int):
         def render_line_row(line):
             with ui.row().classes("w-full items-center gap-3 no-wrap "
                                     "border-b border-gray-200 py-2"):
-                # Colonne nom : different selon le type
+                # Name column: differs depending on the type
                 if line["line_type"] == "part":
-                    # Piece : nom simple
+                    # Part: simple name
                     ui.label(line["part_name"]) \
                         .classes("text-sm flex-grow")
                 else:
-                    # Sous-BOM : pastille bleue cliquable + description
+                    # Sub-BOM: clickable blue badge + description
                     sub_id = line["id_subbom"]
                     def make_open_sub(sid=sub_id):
                         def handler():
@@ -1455,11 +1459,11 @@ def open_bom_edit_dialog(bom_id: int):
                             "text-xs font-mono font-bold "
                             "text-blue-700 bg-blue-100 px-2 py-0.5 rounded")
                         desc = (line["subbom_description"]
-                                or "(sans description)")
+                                or _("(no description)"))
                         ui.label(desc).classes(
                             "text-sm text-blue-700 hover:underline")
 
-                # Quantité éditable (commune aux deux types)
+                # Editable quantity (common to both types)
                 qty_input = ui.number(value=line["quantity"],
                                        min=1, step=1, format="%d") \
                     .classes("w-24")
@@ -1473,7 +1477,7 @@ def open_bom_edit_dialog(bom_id: int):
                     return handler
                 qty_input.on("blur", make_save())
 
-                # Bouton suppression
+                # Delete button
                 def make_del(lid=line["id"]):
                     def handler():
                         ok, msg = delete_bom_line_db(lid)
@@ -1484,9 +1488,9 @@ def open_bom_edit_dialog(bom_id: int):
                 ui.button(icon="delete", on_click=make_del()) \
                     .props("flat round dense color=negative")
 
-        # --- Formulaire d'ajout en bas : toggle Pièce / Sous-BOM -----
-        # Charge la liste des autres BOMs (toutes sauf la BOM courante,
-        # car on ne peut pas s'auto-référencer)
+        # --- Add form at the bottom: toggle Part / Sub-BOM -----------
+        # Load the list of other BOMs (all except the current BOM,
+        # since it cannot reference itself)
         all_boms = fetch_boms()
         other_boms = [b for b in all_boms if b["id"] != bom_id]
         bom_options = {
@@ -1497,33 +1501,33 @@ def open_bom_edit_dialog(bom_id: int):
 
         with ui.column().classes("w-full gap-2 mt-3 "
                                    "border-t border-gray-200 pt-3"):
-            # Toggle de type de ligne à ajouter
+            # Toggle for the type of line to add
             line_type_toggle = ui.toggle(
-                {"part": "Pièce", "subbom": "Sous-BOM"},
+                {"part": _("Part"), "subbom": _("Sub-BOM")},
                 value="part"
             ).props("dense")
 
             with ui.row().classes("w-full items-end gap-2"):
-                # Sélecteur pièce (visible par défaut)
+                # Part selector (visible by default)
                 part_select = ui.select(
                     options=part_options,
-                    label="Pièce", with_input=True
+                    label=_("Part"), with_input=True
                 ).classes("flex-grow")
-                # Sélecteur sous-BOM (masqué par défaut)
+                # Sub-BOM selector (hidden by default)
                 subbom_select = ui.select(
                     options=bom_options,
-                    label="Sous-BOM", with_input=True
+                    label=_("Sub-BOM"), with_input=True
                 ).classes("flex-grow")
                 subbom_select.set_visibility(False)
 
-                qty_add = ui.number(label="Qté", value=1, min=1, step=1,
+                qty_add = ui.number(label=_("Qty"), value=1, min=1, step=1,
                                      format="%d").classes("w-24")
 
                 def on_type_change():
                     is_part = line_type_toggle.value == "part"
                     part_select.set_visibility(is_part)
                     subbom_select.set_visibility(not is_part)
-                    # Reset des valeurs pour éviter la confusion
+                    # Reset the values to avoid confusion
                     part_select.value = None
                     subbom_select.value = None
                 line_type_toggle.on_value_change(on_type_change)
@@ -1533,18 +1537,18 @@ def open_bom_edit_dialog(bom_id: int):
                     if line_type_toggle.value == "part":
                         pid = part_select.value
                         if pid is None:
-                            ui.notify("Sélectionnez une pièce.", type="warning")
+                            ui.notify(_("Select a part."), type="warning")
                             return
                         ok, msg = add_bom_line_db(bom_id, int(pid), qty)
                     else:
                         sid = subbom_select.value
                         if sid is None:
                             if not other_boms:
-                                ui.notify("Aucune autre BOM disponible pour "
-                                          "être ajoutée comme sous-BOM.",
+                                ui.notify(_("No other BOM available to be "
+                                            "added as a sub-BOM."),
                                           type="warning")
                             else:
-                                ui.notify("Sélectionnez une sous-BOM.",
+                                ui.notify(_("Select a sub-BOM."),
                                           type="warning")
                             return
                         ok, msg = add_bom_line_db(bom_id, None, qty,
@@ -1555,7 +1559,7 @@ def open_bom_edit_dialog(bom_id: int):
                         subbom_select.value = None
                         qty_add.value = 1
                         render_lines()
-                ui.button("+ Ajouter", on_click=add_line) \
+                ui.button(_("+ Add"), on_click=add_line) \
                     .props("color=primary")
 
         with ui.row().classes("w-full justify-end mt-3"):
@@ -1566,40 +1570,40 @@ def open_bom_edit_dialog(bom_id: int):
 
 
 # ======================================================================
-#  SYSTEME DE PLUGINS
+#  PLUGIN SYSTEM
 # ======================================================================
-# Architecture :
-# - Un plugin est un dossier dans 'plugins/' contenant a minima :
-#   - manifest.json : metadonnees (id, name, version, description, icon)
-#   - plugin.py    : module Python avec une fonction register(app)
-# - Au demarrage, on scanne plugins/* et on charge chaque plugin valide.
-# - Un plugin enregistre ses propres routes/pages via @ui.page('/plugin/<id>').
-# - Le noyau expose une page d'index /plugins qui liste les plugins
-#   installes sous forme de cartes cliquables.
+# Architecture:
+# - A plugin is a folder in 'plugins/' containing at minimum:
+#   - manifest.json: metadata (id, name, version, description, icon)
+#   - plugin.py    : Python module with a register(app) function
+# - At startup, we scan plugins/* and load each valid plugin.
+# - A plugin registers its own routes/pages via @ui.page('/plugin/<id>').
+# - The core exposes an index page /plugins that lists the installed
+#   plugins as clickable cards.
 #
-# Convention forte : un plugin lit librement la base mais n'ecrit que
-# dans ses propres tables (prefixe 'plugin_<id>_*'). Le noyau garantit
-# ses tables ; un plugin qui plante au chargement est log et ignore,
-# le reste continue a tourner.
+# Strong convention: a plugin reads the database freely but writes only
+# to its own tables (prefix 'plugin_<id>_*'). The core guarantees its
+# tables; a plugin that crashes on load is logged and ignored, the rest
+# keeps running.
 import json
 import importlib.util as _importlib_util
 from pathlib import Path
 
-# Dossier 'plugins/' a la racine du projet (au meme niveau que
-# frontend/ et backend/). Resolu depuis ce fichier pour etre agnostique
-# du cwd.
+# 'plugins/' folder at the project root (at the same level as
+# frontend/ and backend/). Resolved from this file to be agnostic of
+# the cwd.
 def confirm_delete_project(project: dict, on_done):
-    """Dialogue de confirmation pour supprimer un projet, derriere
-    la garde admin. Au refus pour cause de non-vide, affiche la liste."""
+    """Confirmation dialog to delete a project, behind the admin guard.
+    If refused because it is not empty, displays the list."""
     def really_delete():
         with ui.dialog() as dialog, ui.card().classes("min-w-[440px]"):
-            ui.label("Confirmer la suppression du projet") \
+            ui.label(_("Confirm project deletion")) \
                 .classes("text-lg font-bold")
-            ui.label(f"Supprimer définitivement le projet "
-                      f"« {project['code']} » ?") \
+            ui.label(_("Permanently delete project "
+                       "« {code} »?").format(code=project['code'])) \
                 .classes("text-sm")
-            ui.label("Un projet ne peut être supprimé que s\'il ne "
-                      "contient plus aucune pièce et aucune BOM.") \
+            ui.label(_("A project can only be deleted if it no longer "
+                       "contains any part and any BOM.")) \
                 .classes("text-sm text-gray-600")
             error_area = ui.column().classes("w-full gap-1")
 
@@ -1619,19 +1623,19 @@ def confirm_delete_project(project: dict, on_done):
                             ui.label(msg).classes(
                                 "text-sm font-medium text-red-700")
                             if blocking["parts"]:
-                                ui.label("Pièces rattachées :") \
+                                ui.label(_("Attached parts:")) \
                                     .classes("text-xs text-red-600 mt-1")
                                 for p in blocking["parts"][:8]:
                                     ui.label(f"  • {p['part_name']}") \
                                         .classes("text-xs font-mono "
                                                   "text-red-600")
                                 if len(blocking["parts"]) > 8:
-                                    ui.label(f"  … et "
-                                              f"{len(blocking['parts'])-8} "
-                                              f"autres") \
+                                    ui.label(_("  … and {count} "
+                                               "others").format(
+                                                   count=len(blocking['parts'])-8)) \
                                         .classes("text-xs text-red-600")
                             if blocking["boms"]:
-                                ui.label("BOMs rattachées :") \
+                                ui.label(_("Attached BOMs:")) \
                                     .classes("text-xs text-red-600 mt-1")
                                 for b in blocking["boms"][:8]:
                                     ui.label(f"  • {b['code']}") \
@@ -1641,8 +1645,8 @@ def confirm_delete_project(project: dict, on_done):
                     ui.notify(msg, type="negative")
 
             with ui.row().classes("w-full justify-end gap-2 mt-2"):
-                ui.button("Annuler", on_click=dialog.close).props("flat")
-                ui.button("Supprimer", on_click=do_delete) \
+                ui.button(_("Cancel"), on_click=dialog.close).props("flat")
+                ui.button(_("Delete"), on_click=do_delete) \
                     .props("color=negative")
         dialog.open()
     _ensure_admin(really_delete)

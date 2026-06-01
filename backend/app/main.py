@@ -15,24 +15,25 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Point d'entree FastAPI de PiStock.
+FastAPI entry point for PiStock.
 
-Ce fichier est volontairement MINCE : il se contente d'assembler
-l'application a partir des modules de domaine.
+This file is intentionally THIN: it merely assembles the application
+from the domain modules.
 
-  - Le schema de la base vit dans model.py (source unique de verite,
-    partagee avec init_db.py).
-  - Les chemins, le moteur SQL et le logger vivent dans config.py.
-  - La logique metier et les endpoints REST sont decoupes par domaine
-    dans services/*.py (admin, projects, boms, parts, stock), chacun
-    exposant un APIRouter.
-  - L'interface NiceGUI est definie dans frontend/ui.py et s'attache au
-    MEME FastAPI 'app'.
+  - The database schema lives in model.py (single source of truth,
+    shared with init_db.py).
+  - Paths, the SQL engine and the logger live in config.py.
+  - The business logic and REST endpoints are split by domain in
+    services/*.py (admin, projects, boms, parts, stock), each one
+    exposing an APIRouter.
+  - The NiceGUI interface is defined in frontend/ui.py and attaches to
+    the SAME FastAPI 'app'.
 
-FACADE DE COMPATIBILITE : on re-exporte ci-dessous les modeles et les
-helpers publics (`main.Parts`, `main.engine`, `main._flatten_bom`...) car
-l'UI, les plugins (cf. plugins/bom_tree) et la suite de tests y accedent
-via `import main`. Conserver ces noms evite de casser ces consommateurs.
+COMPATIBILITY FACADE: below we re-export the models and the public
+helpers (`main.Parts`, `main.engine`, `main._flatten_bom`...) because
+the UI, the plugins (see plugins/bom_tree) and the test suite access
+them via `import main`. Keeping these names avoids breaking those
+consumers.
 
     uvicorn main:app --reload --host 0.0.0.0 --port 8000
 """
@@ -43,18 +44,18 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import SQLModel
 
-# --- Infrastructure partagee (chemins, engine, logger, util fichiers) ---
-from config import (  # noqa: F401  (re-export pour main.X)
+# --- Shared infrastructure (paths, engine, logger, file utils) ---
+from config import (  # noqa: F401  (re-export for main.X)
     engine, logger, BASE_DIR, DATA_DIR, CAD_DIR, IMG_DIR, DB_PATH,
     _delete_file_if_exists,
 )
 
-# --- Modeles (source unique : model.py), re-exportes pour main.X ---
+# --- Models (single source: model.py), re-exported for main.X ---
 from model import (  # noqa: F401
     Parts, PLM, Stock, Project, Bom, BomLine, Admin,
 )
 
-# --- Helpers metier re-exportes (facade UI / plugins / tests) ---
+# --- Business helpers re-exported (UI / plugins / tests facade) ---
 from services.codes import (  # noqa: F401
     PROJECT_CODE_MAX, _code_to_int, _int_to_code, _next_project_code,
     BOM_CODE_MAX, _next_bom_code,
@@ -69,15 +70,15 @@ from services.stock import _get_or_create_stock  # noqa: F401
 from services.boms import _flatten_bom, _would_create_cycle  # noqa: F401
 from services.parts import VALID_STATUSES, _check_not_locked  # noqa: F401
 
-# --- Routers de domaine ---
+# --- Domain routers ---
 from services import admin, projects, boms, stock, parts
 
 
 app = FastAPI(title="PiStock PLM Receiver")
 
-# L'ordre d'inclusion n'affecte pas le routage : aucune route statique
-# n'est masquee par une route a parametre entre domaines (et au sein de
-# parts.py, '/parts/full' est bien declaree avant '/parts/{part_id}').
+# The inclusion order does not affect routing: no static route is
+# shadowed by a parameterized route across domains (and within
+# parts.py, '/parts/full' is indeed declared before '/parts/{part_id}').
 for _module in (admin, projects, boms, stock, parts):
     app.include_router(_module.router)
 
@@ -89,18 +90,18 @@ def on_startup():
 
 
 # ----------------------------------------------------------------------
-#  FICHIERS STATIQUES + INTERFACE NiceGUI
+#  STATIC FILES + NiceGUI INTERFACE
 # ----------------------------------------------------------------------
-# 1. Les fichiers uploadés (vignettes .png, modèles .glb...) sont servis
-#    sous /uploads/. C'est utilisé à la fois par l'interface NiceGUI
-#    (pour afficher les images) et par le viewer 3D (qui charge le .glb
-#    via une URL HTTP, pas un chemin disque).
+# 1. Uploaded files (.png thumbnails, .glb models...) are served under
+#    /uploads/. This is used both by the NiceGUI interface (to display
+#    images) and by the 3D viewer (which loads the .glb via an HTTP URL,
+#    not a disk path).
 uploads_root = os.path.join(DATA_DIR, "uploads")
 app.mount("/uploads", StaticFiles(directory=uploads_root), name="uploads")
 
-# 2. Assets statiques du frontend (model-viewer.min.js, etc.)
-#    Permet de servir des libs JS en local plutot que via un CDN
-#    -> autonomie complete sans internet, et meilleur controle.
+# 2. Frontend static assets (model-viewer.min.js, etc.)
+#    Allows serving JS libs locally rather than via a CDN
+#    -> full autonomy without internet, and better control.
 FRONTEND_STATIC = os.path.abspath(
     os.path.join(BASE_DIR, "../../frontend/static")
 )
@@ -112,19 +113,19 @@ else:
     logger.warning(f"Dossier static frontend introuvable : {FRONTEND_STATIC}. "
                     f"Le viewer 3D essaiera de charger depuis CDN.")
 
-# 3. L'interface NiceGUI est définie dans frontend/ui.py et s'attache
-#    au MEME FastAPI 'app'. Donc tout tourne sur le meme port :
-#    - http://127.0.0.1:8000/       -> dashboard NiceGUI
-#    - http://127.0.0.1:8000/api/v1 -> endpoints REST (utilises par la macro)
-#    - http://127.0.0.1:8000/uploads/... -> fichiers statiques
+# 3. The NiceGUI interface is defined in frontend/ui.py and attaches to
+#    the SAME FastAPI 'app'. So everything runs on the same port:
+#    - http://127.0.0.1:8000/       -> NiceGUI dashboard
+#    - http://127.0.0.1:8000/api/v1 -> REST endpoints (used by the macro)
+#    - http://127.0.0.1:8000/uploads/... -> static files
 FRONTEND_DIR = os.path.abspath(os.path.join(BASE_DIR, "../../frontend"))
 if FRONTEND_DIR not in sys.path:
     sys.path.insert(0, FRONTEND_DIR)
 
 try:
-    # ui_module enregistre ses pages sur 'app' via @ui.page(...) et
-    # appelle ui.run_with(app) pour brancher NiceGUI sur FastAPI.
-    import ui as ui_module  # noqa: F401  (l'import suffit a tout enregistrer)
+    # ui_module registers its pages on 'app' via @ui.page(...) and
+    # calls ui.run_with(app) to wire NiceGUI into FastAPI.
+    import ui as ui_module  # noqa: F401  (the import alone registers everything)
     logger.info("Interface NiceGUI chargee.")
 except ImportError as e:
     logger.warning(f"Impossible de charger l'UI NiceGUI : {e}")

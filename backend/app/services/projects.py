@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Endpoints PROJETS : liste, creation (code auto-genere), suppression."""
+"""PROJECTS endpoints: list, creation (auto-generated code), deletion."""
 from fastapi import APIRouter, Form, HTTPException, Depends
 from sqlmodel import Session, select
 
@@ -28,7 +28,7 @@ router = APIRouter()
 
 @router.get("/api/v1/projects")
 def list_projects():
-    """Liste de tous les projets, tries par code croissant."""
+    """List of all the projects, sorted by ascending code."""
     with Session(engine) as session:
         projects = session.exec(
             select(Project).order_by(Project.code)
@@ -41,9 +41,9 @@ def list_projects():
 
 @router.post("/api/v1/projects")
 def create_project(description: str = Form(default="")):
-    """Cree un nouveau projet avec un code auto-genere.
-    L'utilisateur fournit seulement la description (optionnelle) ;
-    le code est calcule par le serveur (AAA, AAB, ...)."""
+    """Create a new project with an auto-generated code.
+    The user provides only the (optional) description; the code is
+    computed by the server (AAA, AAB, ...)."""
     description = (description or "").strip() or None
     with Session(engine) as session:
         code = _next_project_code(session)
@@ -65,9 +65,9 @@ def delete_project(
     project_id: int,
     _admin: None = Depends(_require_admin),
 ):
-    """Supprime un projet. REFUSE (409) si des pieces ou des BOMs
-    y sont encore rattachees (meme principe que les pieces dans
-    les BOMs). Necessite le header X-Admin-Password."""
+    """Delete a project. REFUSES (409) if parts or BOMs are still
+    attached to it (same principle as parts within BOMs). Requires the
+    X-Admin-Password header."""
     with Session(engine) as session:
         project = session.get(Project, project_id)
         if project is None:

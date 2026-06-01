@@ -15,14 +15,14 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Endpoints STOCK (quantite, location, supply, photo, fiche composant).
+STOCK endpoints (quantity, location, supply, photo, component datasheet).
 
-A noter : on NE verifie PAS le verrou ici. Le verrou protege le design
-(projet, statut) ; le stock est de l'info operationnelle qu'on doit
-pouvoir mettre a jour meme sur une piece "Asset" verrouillee.
+Note: we do NOT check the lock here. The lock protects the design
+(project, status); stock is operational info that must remain updatable
+even on a locked "Asset" part.
 
-Le helper `_get_or_create_stock` est aussi reutilise par les operations
-de stock des BOMs (services/boms.py).
+The `_get_or_create_stock` helper is also reused by the stock operations
+of the BOMs (services/boms.py).
 """
 import os
 from datetime import datetime, timezone
@@ -38,7 +38,7 @@ router = APIRouter()
 
 
 def _get_or_create_stock(session: Session, part_id: int) -> Stock:
-    """Renvoie la ligne stock pour cette piece, la cree si absente."""
+    """Return the stock row for this part, creating it if absent."""
     stock_row = session.exec(
         select(Stock).where(Stock.id_parts == part_id)
     ).first()
@@ -51,10 +51,10 @@ def _get_or_create_stock(session: Session, part_id: int) -> Stock:
 
 @router.get("/api/v1/parts/{part_id}/stock")
 def get_part_stock(part_id: int):
-    """Renvoie les infos de stock d'une piece. Si la ligne n'existe
-    pas encore, on renvoie des valeurs par defaut (quantity=0, le
-    reste a None) plutot que 404 : du point de vue de l'UI, toute
-    piece a un stock (eventuellement vide)."""
+    """Return the stock info of a part. If the row does not exist yet,
+    we return default values (quantity=0, the rest None) rather than a
+    404: from the UI's point of view, every part has stock (possibly
+    empty)."""
     with Session(engine) as session:
         part = session.get(Parts, part_id)
         if part is None:
@@ -91,14 +91,14 @@ def update_part_stock(
     location: str | None = Form(default=None),
     supply: str | None = Form(default=None),
 ):
-    """Met a jour les infos de stock (quantite, location, supply).
-    Cree la ligne stock si elle n'existe pas. Les chaines vides sont
-    converties en NULL pour la coherence en base."""
+    """Update the stock info (quantity, location, supply). Create the
+    stock row if it does not exist. Empty strings are converted to NULL
+    for database consistency."""
     if quantity < 0:
         raise HTTPException(status_code=400,
                             detail="La quantité ne peut pas être négative.")
 
-    # Normalise : "" -> None
+    # Normalize: "" -> None
     location = (location or "").strip() or None
     supply = (supply or "").strip() or None
 
@@ -125,24 +125,24 @@ def update_part_stock(
 
 @router.post("/api/v1/parts/{part_id}/stock-doc")
 async def upload_stock_doc(part_id: int, doc: UploadFile = File(...)):
-    """Upload (ou remplace) la fiche composant d'une piece. Le fichier
-    va dans data-pistock/uploads/doc/ avec un suffixe timestamp pour
-    eviter les collisions tout en gardant le nom original lisible."""
+    """Upload (or replace) the component datasheet of a part. The file
+    goes into data-pistock/uploads/doc/ with a timestamp suffix to
+    avoid collisions while keeping the original name readable."""
     with Session(engine) as session:
         part = session.get(Parts, part_id)
         if part is None:
             raise HTTPException(status_code=404,
                                 detail=f"Pièce id={part_id} introuvable.")
 
-        # Nom final : "<basename>_<timestamp>.<ext>".
-        # On garde le nom d'origine pour l'identification visuelle.
+        # Final name: "<basename>_<timestamp>.<ext>".
+        # We keep the original name for visual identification.
         ts_tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         original = doc.filename or "fiche.pdf"
         base, ext = os.path.splitext(original)
         if not ext:
             ext = ".pdf"
-        # Sanitisation legere du basename pour eviter les caracteres
-        # problematiques sur disque.
+        # Light sanitization of the basename to avoid characters that
+        # are problematic on disk.
         safe_base = "".join(c if c.isalnum() or c in "-_." else "_"
                              for c in base) or "fiche"
         stamped_name = f"{safe_base}_{ts_tag}{ext}"
@@ -170,24 +170,24 @@ async def upload_stock_doc(part_id: int, doc: UploadFile = File(...)):
 
 @router.post("/api/v1/parts/{part_id}/stock-photo")
 async def upload_stock_photo(part_id: int, photo: UploadFile = File(...)):
-    """Ajoute (ou remplace) la photo de stock d'une piece.
-    Le fichier est sauvegarde sous data-pistock/uploads/img/stock_<id>_<ts>.<ext>
-    et le chemin est stocke dans la table 'stock'. Si aucune ligne
-    stock n'existe encore pour cette piece, on en cree une."""
+    """Add (or replace) the stock photo of a part.
+    The file is saved under data-pistock/uploads/img/stock_<id>_<ts>.<ext>
+    and the path is stored in the 'stock' table. If no stock row exists
+    yet for this part, one is created."""
     with Session(engine) as session:
         part = session.get(Parts, part_id)
         if part is None:
             raise HTTPException(status_code=404,
                                 detail=f"Aucune pièce avec l'id {part_id}.")
 
-        # Sauvegarde du fichier sur disque dans uploads/stkimg/.
-        # Ce dossier est dedie aux photos de pieces "en stock" (prises
-        # au telephone, scannees, etc.), distinct de uploads/img/ qui
-        # contient les vignettes CAO generees par FreeCAD.
+        # Save the file on disk in uploads/stkimg/.
+        # This directory is dedicated to photos of parts "in stock"
+        # (taken with a phone, scanned, etc.), distinct from uploads/img/
+        # which holds the CAD thumbnails generated by FreeCAD.
         ts_tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         _, ext = os.path.splitext(photo.filename or "")
         if not ext:
-            ext = ".jpg"  # fallback raisonnable
+            ext = ".jpg"  # reasonable fallback
         stamped_name = f"stock_{part_id}_{ts_tag}{ext}"
         dest_dir = os.path.join(DATA_DIR, "uploads", "stkimg")
         os.makedirs(dest_dir, exist_ok=True)
@@ -197,7 +197,7 @@ async def upload_stock_photo(part_id: int, photo: UploadFile = File(...)):
         rel_path = f"uploads/stkimg/{stamped_name}"
         logger.info(f"Photo stock sauvegardée : {file_path}")
 
-        # Mise a jour (ou creation) de la ligne stock
+        # Update (or create) the stock row
         stock_row = session.exec(
             select(Stock).where(Stock.id_parts == part_id)
         ).first()

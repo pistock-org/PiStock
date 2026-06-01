@@ -19,10 +19,10 @@ import sys
 
 from sqlmodel import SQLModel, create_engine
 
-# Le schema des tables vit dans backend/app/model.py (SOURCE UNIQUE DE
-# VERITE, partagee avec le serveur main.py). On l'ajoute au path puis on
-# importe les modeles : leur simple import les enregistre dans la
-# metadata SQLModel, ce qui suffit a create_all() pour creer les tables.
+# The table schema lives in backend/app/model.py (SINGLE SOURCE OF
+# TRUTH, shared with the main.py server). We add it to the path then
+# import the models: simply importing them registers them in the
+# SQLModel metadata, which is enough for create_all() to create the tables.
 _APP_DIR = os.path.abspath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 )
@@ -49,7 +49,7 @@ def setup_pistock_environment():
         os.path.join(uploads_dir, "cad"),
         os.path.join(uploads_dir, "img"),
         os.path.join(uploads_dir, "doc"),
-        os.path.join(uploads_dir, "stkimg"),  # photos de stock (prises au telephone, etc.)
+        os.path.join(uploads_dir, "stkimg"),  # stock photos (taken with a phone, etc.)
     ]
 
     # 2. Create the directories if they don't exist
@@ -58,30 +58,30 @@ def setup_pistock_environment():
         os.makedirs(folder, exist_ok=True)
         print(f"   ✔️  Created: ...{os.path.relpath(folder, data_dir)}")
 
-    # 3. Le schema des tables (Parts, PLM, Stock, Project, Bom, BomLine,
-    #    Admin) est importe depuis model.py en haut de ce fichier. Le
-    #    simple import a enregistre les classes dans la metadata
-    #    SQLModel ; create_all() ci-dessous cree donc toutes les tables.
+    # 3. The table schema (Parts, PLM, Stock, Project, Bom, BomLine,
+    #    Admin) is imported from model.py at the top of this file. The
+    #    import alone registered the classes in the SQLModel metadata;
+    #    create_all() below therefore creates all the tables.
 
     # 4. Initialize SQLite Database Engine
     db_path = os.path.join(data_dir, "pistockdatabase.sqlite3")
 
-    # --- BLOC DE SÉCURITÉ : Vérification de l'existence du système ---
+    # --- SAFETY BLOCK: check whether the system already exists ---
     if os.path.exists(db_path):
         print("\n⚠️  [WARNING] A PiStock database already exists at this location!")
         print(f"📍 Path: {db_path}")
 
-        # Demande de confirmation à l'utilisateur
+        # Ask the user for confirmation
         choice = input("👉 Do you want to overwrite everything and reset the database? (y/N): ").strip().lower()
 
         if choice != 'y':
             print("\n❌ Operation cancelled. Your existing data and folders were NOT modified.")
             print("==================================================")
-            return  # Arrête la fonction proprement ici
+            return  # Stop the function cleanly here
 
         print("\n🔄 Overwriting allowed. Resetting the environment...")
-        # On supprime l'ancien fichier pour repartir d'un schema propre
-        # (sinon create_all ne modifie PAS les tables deja existantes).
+        # We delete the old file to start from a clean schema
+        # (otherwise create_all does NOT modify already-existing tables).
         os.remove(db_path)
     # -----------------------------------------------------------------
 

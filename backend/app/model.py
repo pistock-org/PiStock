@@ -15,22 +15,22 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Schema de la base de donnees PiStock — SOURCE UNIQUE DE VERITE.
+PiStock database schema — SINGLE SOURCE OF TRUTH.
 
-Ce module definit les tables SQLModel utilisees a la fois par :
-  - le serveur (backend/app/main.py) au runtime ;
-  - le script d'initialisation (backend/app/install/init_db.py) qui
-    appelle SQLModel.metadata.create_all().
+This module defines the SQLModel tables used both by:
+  - the server (backend/app/main.py) at runtime;
+  - the initialization script (backend/app/install/init_db.py) which
+    calls SQLModel.metadata.create_all().
 
-Auparavant ces classes etaient dupliquees dans main.py ET dans
-init_db.py, ce qui imposait de modifier le schema a deux endroits (et
-avait deja divergé : la table 'admin' manquait dans init_db.py). En
-centralisant ici, le schema reste coherent par construction.
+Previously these classes were duplicated in main.py AND in init_db.py,
+which forced changing the schema in two places (and had already
+diverged: the 'admin' table was missing from init_db.py). By
+centralizing here, the schema stays consistent by construction.
 
-IMPORTANT : ne definir les tables qu'UNE SEULE FOIS. SQLModel enregistre
-chaque classe `table=True` dans une metadata partagee ; une double
-definition leverait "Table '...' is already defined". On importe donc
-ces classes, on ne les redefinit jamais.
+IMPORTANT: define the tables ONLY ONCE. SQLModel registers each
+`table=True` class in a shared metadata; a double definition would raise
+"Table '...' is already defined". So we import these classes, we never
+redefine them.
 """
 from datetime import datetime, timezone
 
@@ -41,15 +41,15 @@ class Parts(SQLModel, table=True):
     __tablename__ = "parts"
     id: int | None = Field(default=None, primary_key=True)
     part_name: str = Field(index=True, unique=True)
-    # Lien optionnel vers un projet. Nullable car une piece peut
-    # exister sans projet (legacy ou pieces standalone).
+    # Optional link to a project. Nullable because a part can exist
+    # without a project (legacy or standalone parts).
     id_project: int | None = Field(default=None, foreign_key="project.id")
-    # Statut de maturite de la piece : 'Init' (en cours), 'Revue'
-    # (en relecture), 'Asset' (validee, prete pour usage prod).
+    # Maturity status of the part: 'Init' (in progress), 'Revue'
+    # (under review), 'Asset' (validated, ready for production use).
     status: str = Field(default="Init")
-    # Verrou : quand True, l'UI empeche les modifications (projet,
-    # statut). N'empeche PAS les uploads de nouvelles revisions via la
-    # macro FreeCAD (sinon trop restrictif pour un PLM).
+    # Lock: when True, the UI prevents modifications (project, status).
+    # Does NOT prevent uploads of new revisions via the FreeCAD macro
+    # (otherwise too restrictive for a PLM).
     locked: bool = Field(default=False)
 
 
@@ -64,26 +64,26 @@ class PLM(SQLModel, table=True):
         default_factory=lambda: datetime.now(timezone.utc)
     )
     author: str | None = Field(default=None)
-    # Numero de version : deux lettres minuscules, aa->zz (676 max).
-    # Incremente automatiquement a chaque nouvelle revision PLM POUR
-    # UNE PIECE DONNEE. Premier push d'une piece = 'aa'.
+    # Version number: two lowercase letters, aa->zz (676 max).
+    # Incremented automatically on each new PLM revision FOR A GIVEN
+    # PART. First push of a part = 'aa'.
     version: str = Field(default="aa", max_length=2)
-    # Flag "revision principale" : si une revision est marquee
-    # is_main=True, c'est elle qui s'affiche partout (au lieu de la
-    # plus recente par timestamp, qui reste le fallback).
+    # "Main revision" flag: if a revision is marked is_main=True, it is
+    # the one displayed everywhere (instead of the most recent by
+    # timestamp, which remains the fallback).
     is_main: bool = Field(default=False)
 
 
 class Stock(SQLModel, table=True):
     __tablename__ = "stock"
     id: int | None = Field(default=None, primary_key=True)
-    # Lien direct vers la cle primaire de la table parts.
+    # Direct link to the primary key of the parts table.
     id_parts: int = Field(foreign_key="parts.id", nullable=False)
     path_2_img: str | None = Field(default=None)
     quantity: int = Field(default=0)
     location: str | None = Field(default=None)
     supply: str | None = Field(default=None)
-    # Chemin vers la fiche composant (PDF, datasheet...) stockee dans
+    # Path to the component datasheet (PDF, datasheet...) stored in
     # data-pistock/uploads/doc/.
     path_2_doc: str | None = Field(default=None)
 
@@ -91,24 +91,24 @@ class Stock(SQLModel, table=True):
 class Project(SQLModel, table=True):
     __tablename__ = "project"
     id: int | None = Field(default=None, primary_key=True)
-    # Code alphabetique a 3 lettres majuscules, incremental : AAA, AAB,
-    # ..., AAZ, ABA, ..., ZZZ. Unique car il sert d'identifiant lisible
-    # (visible dans l'UI).
+    # Alphabetical code of 3 uppercase letters, incremental: AAA, AAB,
+    # ..., AAZ, ABA, ..., ZZZ. Unique because it serves as a readable
+    # identifier (visible in the UI).
     code: str = Field(index=True, unique=True, max_length=3)
-    # Description libre, multi-lignes. Optionnelle.
+    # Free-form, multi-line description. Optional.
     description: str | None = Field(default=None)
 
 
 class Bom(SQLModel, table=True):
     __tablename__ = "bom"
     id: int | None = Field(default=None, primary_key=True)
-    # Code BOM : B + 4 chiffres zero-padded (B0001, B0002, ...).
-    # Incremental, unique, lisible.
+    # BOM code: B + 4 zero-padded digits (B0001, B0002, ...).
+    # Incremental, unique, readable.
     code: str = Field(index=True, unique=True, max_length=5)
-    # Description libre.
+    # Free-form description.
     description: str | None = Field(default=None)
-    # Lien optionnel vers un projet : une BOM peut etre rattachee a un
-    # projet (la BOM d'un produit) ou exister independamment.
+    # Optional link to a project: a BOM can be attached to a project
+    # (the BOM of a product) or exist independently.
     id_project: int | None = Field(default=None, foreign_key="project.id")
 
 
@@ -116,26 +116,26 @@ class BomLine(SQLModel, table=True):
     __tablename__ = "bom_line"
     id: int | None = Field(default=None, primary_key=True)
     id_bom: int = Field(foreign_key="bom.id", nullable=False)
-    # Exactement UN des deux champs suivants doit etre renseigne :
-    # - id_parts : ligne pour une piece (cas standard)
-    # - id_subbom : ligne pour une sous-BOM (assemblage hierarchique)
-    # La contrainte est appliquee cote applicatif.
+    # Exactly ONE of the two following fields must be set:
+    # - id_parts: line for a part (standard case)
+    # - id_subbom: line for a sub-BOM (hierarchical assembly)
+    # The constraint is enforced on the application side.
     id_parts: int | None = Field(default=None, foreign_key="parts.id")
     id_subbom: int | None = Field(default=None, foreign_key="bom.id")
-    # Quantite necessaire de cette piece ou sous-BOM pour assembler une
-    # unite de la BOM parente.
+    # Quantity of this part or sub-BOM required to assemble one unit of
+    # the parent BOM.
     quantity: int = Field(default=1)
 
 
-# Compte admin (singleton : on n'utilise jamais qu'une seule ligne,
-# id=1). Sert aux operations destructives (suppressions, deverrouillage).
-# Voir endpoints /api/v1/admin/* et helpers _check_admin_password /
-# _require_admin dans main.py.
+# Admin account (singleton: we only ever use a single row, id=1).
+# Used for destructive operations (deletions, unlocking). See the
+# /api/v1/admin/* endpoints and the _check_admin_password /
+# _require_admin helpers in main.py.
 class Admin(SQLModel, table=True):
     __tablename__ = "admin"
     id: int | None = Field(default=None, primary_key=True)
-    salt: str            # 16 octets aleatoires, en hex
-    password_hash: str   # PBKDF2-HMAC-SHA256, 200_000 iter, en hex
+    salt: str            # 16 random bytes, in hex
+    password_hash: str   # PBKDF2-HMAC-SHA256, 200_000 iter, in hex
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

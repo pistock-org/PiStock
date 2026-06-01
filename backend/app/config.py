@@ -15,11 +15,11 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Infrastructure partagee : chemins, moteur SQL, logger.
+Shared infrastructure: paths, SQL engine, logger.
 
-Centralise ce qui etait auparavant en tete de main.py pour que tous les
-services (services/*.py) partagent le MEME engine et les MEMES chemins
-sans import circulaire vers main.
+Centralizes what used to be at the top of main.py so that all the
+services (services/*.py) share the SAME engine and the SAME paths
+without a circular import back to main.
 """
 import os
 import logging
@@ -29,15 +29,15 @@ from sqlmodel import create_engine
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pistock")
 
-# Configuration des chemins (a adapter selon votre arborescence).
-# BASE_DIR pointe sur backend/app/ (le dossier de ce fichier).
+# Path configuration (adapt to your directory layout).
+# BASE_DIR points to backend/app/ (the directory of this file).
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.abspath(os.path.join(BASE_DIR, "../../../data-pistock"))
 CAD_DIR = os.path.join(DATA_DIR, "uploads", "cad")
 IMG_DIR = os.path.join(DATA_DIR, "uploads", "img")
 DB_PATH = os.path.join(DATA_DIR, "pistockdatabase.sqlite3")
 
-# S'assurer que tous les dossiers necessaires existent
+# Make sure all the required directories exist
 os.makedirs(CAD_DIR, exist_ok=True)
 os.makedirs(IMG_DIR, exist_ok=True)
 
@@ -45,9 +45,9 @@ engine = create_engine(f"sqlite:///{DB_PATH}")
 
 
 def _delete_file_if_exists(rel_path: str | None):
-    """Supprime un fichier sur disque a partir d'un chemin relatif
-    a DATA_DIR. Silencieux si le fichier n'existe pas ou en cas
-    d'erreur d'I/O (on prefere ne pas planter pour ca)."""
+    """Delete a file on disk from a path relative to DATA_DIR. Silent
+    if the file does not exist or on an I/O error (we prefer not to
+    crash over that)."""
     if not rel_path:
         return
     abs_path = os.path.join(DATA_DIR, rel_path)

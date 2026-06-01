@@ -14,12 +14,12 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Couche d'acces a la base de donnees pour l'UI.
+"""Database access layer for the UI.
 
-Toutes les fonctions accedent directement aux modeles SQLModel via
-main (import paresseux pour eviter le cycle a l'import) plutot que
-par HTTP interne. Les operations destructives verifient la session
-admin (_session_admin_active) en defense en profondeur.
+All functions access the SQLModel models directly via main (lazy
+import to avoid the import cycle) rather than through internal HTTP.
+Destructive operations check the admin session (_session_admin_active)
+as defense in depth.
 """
 import os
 from sqlmodel import Session, select
@@ -27,16 +27,16 @@ from components.admin import _session_admin_active
 
 
 def _db():
-    """Helper qui renvoie tous les symboles dont on a besoin depuis main."""
+    """Helper that returns all the symbols we need from main."""
     import main
     return main.engine, main.Parts, main.PLM, main.Stock, main.DATA_DIR
 def delete_project_db(project_id: int):
-    """Supprime un projet (UI in-process). Refuse (renvoie blocking)
-    si des pieces ou des BOMs y sont encore rattachees. Necessite que
-    la session soit admin (defense en profondeur).
+    """Delete a project (in-process UI). Refuses (returns blocking)
+    if parts or BOMs are still attached to it. Requires the session
+    to be admin (defense in depth).
 
-    Retourne (ok: bool, msg: str, blocking: dict|None).
-    Si blocking n'est pas None, il contient {"parts":[...], "boms":[...]}.
+    Returns (ok: bool, msg: str, blocking: dict|None).
+    If blocking is not None, it contains {"parts":[...], "boms":[...]}.
     """
     if not _session_admin_active():
         return False, "Session admin requise.", None
@@ -71,19 +71,19 @@ def delete_project_db(project_id: int):
         session.delete(project); session.commit()
         return True, f"Projet « {code} » supprimé.", None
 def _db_project():
-    """Helper dedie aux projets : renvoie engine + classe Project +
-    fonction de generation du prochain code. On garde un helper distinct
-    pour ne pas casser la signature de _db() utilisee partout ailleurs."""
+    """Helper dedicated to projects: returns engine + Project class +
+    the next-code generation function. We keep a separate helper so as
+    not to break the signature of _db() used everywhere else."""
     import main
     return main.engine, main.Project, main._next_project_code
 
 
 # ======================================================================
-#  ACCES BASE DE DONNEES
+#  DATABASE ACCESS
 # ======================================================================
 def fetch_parts_full(project_code: str | None = None):
-    """Liste enrichie : pour chaque piece, derniere revision PLM,
-    infos de stock, projet associe, statut, verrou. Filtre optionnel."""
+    """Enriched list: for each part, latest PLM revision, stock info,
+    associated project, status, lock. Optional filter."""
     engine, Parts, PLM, Stock, _ = _db()
     import main
     Project_cls = main.Project
@@ -98,7 +98,7 @@ def fetch_parts_full(project_code: str | None = None):
             query = query.where(Parts.id_project == project.id)
         parts = session.exec(query).all()
 
-        # Pre-charge des codes projets pour eviter une requete par piece
+        # Preload project codes to avoid one query per part
         projects_by_id = {
             p.id: p.code
             for p in session.exec(select(Project_cls)).all()
@@ -106,10 +106,10 @@ def fetch_parts_full(project_code: str | None = None):
 
         result = []
         for p in parts:
-            # IMPORTANT : on utilise le helper main._get_current_plm
-            # pour rester coherent avec le reste du backend. Sinon
-            # le dashboard afficherait la plus recente meme quand
-            # l'utilisateur a marque une autre revision comme "principale".
+            # IMPORTANT: we use the main._get_current_plm helper
+            # to stay consistent with the rest of the backend. Otherwise
+            # the dashboard would show the most recent one even when
+            # the user has marked another revision as "main".
             latest_plm = main._get_current_plm(session, p.id)
             stock_row = session.exec(
                 select(Stock).where(Stock.id_parts == p.id)
@@ -138,7 +138,7 @@ def fetch_parts_full(project_code: str | None = None):
 
 
 def fetch_last_used_project_id():
-    """Renvoie l'id du dernier projet utilise (par une piece), ou None."""
+    """Returns the id of the last project used (by a part), or None."""
     engine, Parts_cls, _, _, _ = _db()
     with Session(engine) as session:
         part = session.exec(
@@ -151,7 +151,7 @@ def fetch_last_used_project_id():
 
 
 def assign_project_to_part(part_id: int, project_id: int | None):
-    """Assigne (ou dissocie si None) un projet. Retourne (ok, msg)."""
+    """Assigns (or dissociates if None) a project. Returns (ok, msg)."""
     engine, Parts_cls, _, _, _ = _db()
     import main
     Project_cls = main.Project
@@ -171,7 +171,7 @@ def assign_project_to_part(part_id: int, project_id: int | None):
 
 
 def set_part_status_db(part_id: int, new_status: str):
-    """Change le statut Init/Revue/Asset. Retourne (ok, msg)."""
+    """Change the Init/Revue/Asset status. Returns (ok, msg)."""
     if new_status not in ("Init", "Revue", "Asset"):
         return (False, "Statut invalide.")
     engine, Parts_cls, _, _, _ = _db()
@@ -188,14 +188,14 @@ def set_part_status_db(part_id: int, new_status: str):
 
 
 def toggle_part_lock_db(part_id: int):
-    """Inverse le verrou. Retourne (ok, msg, new_locked).
-    Le DEVERROUILLAGE exige une session admin ; verrouiller reste libre."""
+    """Toggles the lock. Returns (ok, msg, new_locked).
+    UNLOCKING requires an admin session; locking remains unrestricted."""
     engine, Parts_cls, _, _, _ = _db()
     with Session(engine) as session:
         part = session.get(Parts_cls, part_id)
         if part is None:
             return (False, "Pièce introuvable.", None)
-        # Le DEVERROUILLAGE exige une session admin ; verrouiller reste libre.
+        # UNLOCKING requires an admin session; locking remains unrestricted.
         if part.locked and not _session_admin_active():
             return False, "Session admin requise pour déverrouiller.", part.locked
         part.locked = not part.locked
@@ -207,11 +207,11 @@ def toggle_part_lock_db(part_id: int):
 
 
 # ----------------------------------------------------------------------
-#  STOCK : helpers DB
+#  STOCK: DB helpers
 # ----------------------------------------------------------------------
 def fetch_stock(part_id: int):
-    """Renvoie les infos stock courantes. Si pas de ligne, valeurs
-    par defaut (quantity=0, le reste a None)."""
+    """Returns the current stock info. If there is no row, default
+    values (quantity=0, the rest None)."""
     engine, _, _, Stock_cls, _ = _db()
     with Session(engine) as session:
         row = session.exec(
@@ -230,8 +230,8 @@ def fetch_stock(part_id: int):
 
 def save_stock(part_id: int, quantity: int,
                 location: str | None, supply: str | None):
-    """Sauve les infos stock. Cree la ligne si elle n'existe pas.
-    Le verrou ne s'applique pas : stock = info operationnelle."""
+    """Saves the stock info. Creates the row if it does not exist.
+    The lock does not apply: stock = operational info."""
     if quantity is None or quantity < 0:
         return (False, "La quantité doit être un entier positif ou nul.")
     location = (location or "").strip() or None
@@ -256,16 +256,16 @@ def save_stock(part_id: int, quantity: int,
 
 
 def fetch_part_detail(part_id: int):
-    """Detail d'une piece pour la page viewer 3D. Renvoie la revision
-    "courante" (is_main si marquee, sinon la plus recente)."""
+    """Detail of a part for the 3D viewer page. Returns the "current"
+    revision (is_main if marked, otherwise the most recent)."""
     engine, Parts, PLM, _, _ = _db()
     import main
     with Session(engine) as session:
         p = session.get(Parts, part_id)
         if p is None:
             return None
-        # Utilise le helper centralise dans main pour rester coherent
-        # avec le reste du backend.
+        # Use the centralized helper in main to stay consistent
+        # with the rest of the backend.
         latest_plm = main._get_current_plm(session, p.id)
         return {
             "id": p.id,
@@ -280,9 +280,9 @@ def fetch_part_detail(part_id: int):
 
 
 def fetch_revisions(part_id: int):
-    """Liste toutes les revisions PLM d'une piece, plus recente en
-    premier. Chaque entree a 'is_current' = True pour celle qui est
-    affichee par defaut (is_main ou plus recente par timestamp)."""
+    """Lists all PLM revisions of a part, most recent first. Each entry
+    has 'is_current' = True for the one displayed by default (is_main or
+    most recent by timestamp)."""
     engine, _, PLM, _, _ = _db()
     import main
     with Session(engine) as session:
@@ -309,11 +309,11 @@ def fetch_revisions(part_id: int):
 
 
 def delete_revision_db(plm_id: int):
-    # Garde admin (defense en profondeur — l'UI gate aussi).
+    # Admin guard (defense in depth — the UI gates this too).
     if not _session_admin_active():
         return False, "Session admin requise."
-    """Supprime une revision (ligne + fichiers disque). Verifie le
-    verrou de la piece parente. Retourne (ok, msg)."""
+    """Deletes a revision (row + disk files). Checks the lock of the
+    parent part. Returns (ok, msg)."""
     engine, Parts_cls, PLM_cls, _, DATA_DIR = _db()
     with Session(engine) as session:
         plm = session.get(PLM_cls, plm_id)
@@ -325,7 +325,7 @@ def delete_revision_db(plm_id: int):
                     f"Pièce '{part.part_name}' verrouillée — "
                     f"déverrouillez avant de supprimer.")
 
-        # Suppression des fichiers (best-effort, ignore les erreurs)
+        # File deletion (best-effort, errors ignored)
         for rel_path in (plm.path_2_cadfile, plm.path_2_thumbnail,
                           plm.path_2_3dglb):
             if not rel_path:
@@ -343,8 +343,8 @@ def delete_revision_db(plm_id: int):
 
 
 def set_revision_main_db(plm_id: int):
-    """Marque cette revision principale (et demarque les autres).
-    Verifie le verrou. Retourne (ok, msg)."""
+    """Marks this revision as main (and unmarks the others).
+    Checks the lock. Returns (ok, msg)."""
     engine, Parts_cls, PLM_cls, _, _ = _db()
     with Session(engine) as session:
         plm = session.get(PLM_cls, plm_id)
@@ -355,7 +355,7 @@ def set_revision_main_db(plm_id: int):
             return (False,
                     f"Pièce '{part.part_name}' verrouillée — "
                     f"déverrouillez avant de modifier.")
-        # Demarque toutes les autres de la meme piece
+        # Unmark all the others of the same part
         others = session.exec(
             select(PLM_cls)
             .where(PLM_cls.id_parts == plm.id_parts)
@@ -372,7 +372,7 @@ def set_revision_main_db(plm_id: int):
 
 
 def create_part_in_db(part_name: str):
-    """Cree une piece manuellement (sans CAO). Retourne (ok, message, id)."""
+    """Creates a part manually (without CAD). Returns (ok, message, id)."""
     engine, Parts, _, _, _ = _db()
     part_name = part_name.strip()
     if not part_name:
@@ -394,10 +394,10 @@ def create_part_in_db(part_name: str):
 
 
 # ----------------------------------------------------------------------
-#  PROJETS
+#  PROJECTS
 # ----------------------------------------------------------------------
 def fetch_projects():
-    """Liste tous les projets, tries par code croissant."""
+    """Lists all projects, sorted by ascending code."""
     engine, Project, _ = _db_project()
     with Session(engine) as session:
         projects = session.exec(
@@ -410,14 +410,14 @@ def fetch_projects():
 
 
 def create_project_in_db(description: str):
-    """Cree un projet avec code auto-genere. Retourne (ok, msg, code)."""
+    """Creates a project with an auto-generated code. Returns (ok, msg, code)."""
     engine, Project, next_project_code = _db_project()
     description = (description or "").strip() or None
     with Session(engine) as session:
         try:
             code = next_project_code(session)
         except Exception as e:
-            # Cas extreme : ZZZ atteint (HTTPException levee par main)
+            # Edge case: ZZZ reached (HTTPException raised by main)
             return (False, str(e), None)
         project = Project(code=code, description=description)
         session.add(project)
@@ -427,14 +427,14 @@ def create_project_in_db(description: str):
 
 
 # ----------------------------------------------------------------------
-#  HELPERS DB : BOM (nomenclatures)
+#  DB HELPERS: BOM (Bills of Materials)
 # ----------------------------------------------------------------------
-# Pattern identique aux autres entites : on accede directement a la
-# session SQLModel (pas via HTTP). main.Bom / main.BomLine sont
-# importes a la demande pour eviter l'import circulaire.
+# Same pattern as the other entities: we access the SQLModel session
+# directly (not via HTTP). main.Bom / main.BomLine are imported on
+# demand to avoid the circular import.
 
 def fetch_boms(project_code: str | None = None):
-    """Liste les BOMs avec compteur de lignes."""
+    """Lists the BOMs with a line count."""
     import main
     engine = main.engine
     with Session(engine) as session:
@@ -469,9 +469,9 @@ def fetch_boms(project_code: str | None = None):
 
 
 def fetch_bom_detail(bom_id: int):
-    """Detail d'une BOM + ses lignes. Chaque ligne a 'line_type' =
-    'part' ou 'subbom' ; selon le cas, soit part_name est rempli,
-    soit subbom_code + subbom_description."""
+    """Detail of a BOM + its lines. Each line has 'line_type' =
+    'part' or 'subbom'; depending on the case, either part_name is
+    filled, or subbom_code + subbom_description."""
     import main
     with Session(main.engine) as session:
         bom = session.get(main.Bom, bom_id)
@@ -482,7 +482,7 @@ def fetch_bom_detail(bom_id: int):
             .where(main.BomLine.id_bom == bom_id)
             .order_by(main.BomLine.id)
         ).all()
-        # Pre-charge parts + sous-BOMs referencees
+        # Preload referenced parts + sub-BOMs
         part_ids = {l.id_parts for l in lines_rows
                      if l.id_parts is not None}
         subbom_ids = {l.id_subbom for l in lines_rows
@@ -522,7 +522,7 @@ def fetch_bom_detail(bom_id: int):
                 entry["subbom_code"] = sub.code if sub else "?"
                 entry["subbom_description"] = sub.description if sub else None
             else:
-                continue  # ligne corrompue, on saute
+                continue  # corrupted line, skip it
             result_lines.append(entry)
 
         return {
@@ -536,7 +536,7 @@ def fetch_bom_detail(bom_id: int):
 
 
 def create_bom_db(description: str, id_project: int | None):
-    """Cree une BOM. Retourne (ok, msg, code)."""
+    """Creates a BOM. Returns (ok, msg, code)."""
     import main
     description = (description or "").strip() or None
     with Session(main.engine) as session:
@@ -558,7 +558,7 @@ def create_bom_db(description: str, id_project: int | None):
 def delete_bom_db(bom_id: int):
     if not _session_admin_active():
         return False, "Session admin requise."
-    """Supprime une BOM et ses lignes (necessite session admin)."""
+    """Deletes a BOM and its lines (requires an admin session)."""
     import main
     with Session(main.engine) as session:
         bom = session.get(main.Bom, bom_id)
@@ -577,15 +577,14 @@ def delete_bom_db(bom_id: int):
 def delete_part_db(part_id: int):
     if not _session_admin_active():
         return False, "Session admin requise.", None
-    """Supprime DEFINITIVEMENT une piece (necessite session admin).
+    """PERMANENTLY deletes a part (requires an admin session).
 
-    Supprime aussi en cascade
-    sur PLM, Stock et fichiers physiques. Refus si la piece est
-    referencee dans une BOM.
+    Also cascades the deletion to PLM, Stock and physical files.
+    Refuses if the part is referenced in a BOM.
 
-    Retourne (ok, msg, blocking_boms) ou blocking_boms est :
-    - None si suppression OK ou erreur generique
-    - liste de {id, code, description} si la piece est dans des BOMs
+    Returns (ok, msg, blocking_boms) where blocking_boms is:
+    - None if deletion OK or generic error
+    - a list of {id, code, description} if the part is in some BOMs
     """
     import main
     with Session(main.engine) as session:
@@ -593,7 +592,7 @@ def delete_part_db(part_id: int):
         if part is None:
             return (False, "Pièce introuvable.", None)
 
-        # Verifie si referencee dans une BOM (id_parts, pas id_subbom)
+        # Check whether referenced in a BOM (id_parts, not id_subbom)
         blocking = session.exec(
             select(main.Bom).join(
                 main.BomLine, main.BomLine.id_bom == main.Bom.id)
@@ -613,7 +612,7 @@ def delete_part_db(part_id: int):
                 bom_info
             )
 
-        # Cascade : revisions PLM (avec leurs fichiers)
+        # Cascade: PLM revisions (with their files)
         plm_rows = session.exec(
             select(main.PLM).where(main.PLM.id_parts == part_id)
         ).all()
@@ -623,7 +622,7 @@ def delete_part_db(part_id: int):
             main._delete_file_if_exists(plm.path_2_3dglb)
             session.delete(plm)
 
-        # Stock (avec photo + doc)
+        # Stock (with photo + doc)
         stock = session.exec(
             select(main.Stock).where(main.Stock.id_parts == part_id)
         ).first()
@@ -645,9 +644,9 @@ def delete_part_db(part_id: int):
 
 def add_bom_line_db(bom_id: int, part_id: int | None,
                      quantity: int, subbom_id: int | None = None):
-    """Ajoute une ligne BOM. Soit part_id soit subbom_id, pas les deux.
-    Si la cible existe deja dans la BOM, la quantite est cumulee.
-    Pour subbom_id : refus si cycle detecte. Retourne (ok, msg)."""
+    """Adds a BOM line. Either part_id or subbom_id, not both.
+    If the target already exists in the BOM, the quantity is accumulated.
+    For subbom_id: refused if a cycle is detected. Returns (ok, msg)."""
     if (part_id is None) == (subbom_id is None):
         return (False, "Sélectionnez exactement une pièce OU une sous-BOM.")
     if quantity is None or quantity <= 0:
@@ -692,7 +691,7 @@ def add_bom_line_db(bom_id: int, part_id: int | None,
 
 
 def update_bom_line_db(line_id: int, quantity: int):
-    """Met a jour la quantite. Retourne (ok, msg)."""
+    """Updates the quantity. Returns (ok, msg)."""
     if quantity is None or quantity <= 0:
         return (False, "La quantité doit être > 0.")
     import main
@@ -707,7 +706,7 @@ def update_bom_line_db(line_id: int, quantity: int):
 
 
 def delete_bom_line_db(line_id: int):
-    """Supprime une ligne. Retourne (ok, msg)."""
+    """Deletes a line. Returns (ok, msg)."""
     import main
     with Session(main.engine) as session:
         line = session.get(main.BomLine, line_id)
@@ -719,13 +718,13 @@ def delete_bom_line_db(line_id: int):
 
 
 def bom_stock_apply(bom_id: int, factor: int, direction: str):
-    """Applique 'factor' fois la BOM sur le stock. Traverse
-    RECURSIVEMENT les sous-BOMs via main._flatten_bom : pour une
-    BOM contenant des sous-BOMs, on calcule d'abord le total par
-    piece feuille, puis on applique sur le stock.
-    direction='add' : incremente. direction='sub' : decremente, refus
-    atomique si stock insuffisant.
-    Retourne (ok, msg, shortages_list)."""
+    """Applies the BOM 'factor' times to the stock. RECURSIVELY
+    traverses the sub-BOMs via main._flatten_bom: for a BOM containing
+    sub-BOMs, we first compute the total per leaf part, then apply it
+    to the stock.
+    direction='add': increment. direction='sub': decrement, atomic
+    refusal if stock is insufficient.
+    Returns (ok, msg, shortages_list)."""
     if factor is None or factor <= 0:
         return (False, "Le facteur doit être > 0.", None)
     import main
@@ -733,21 +732,21 @@ def bom_stock_apply(bom_id: int, factor: int, direction: str):
         bom = session.get(main.Bom, bom_id)
         if bom is None:
             return (False, "BOM introuvable.", None)
-        # Verifie qu'il y a au moins une ligne (sinon BOM vide)
+        # Check that there is at least one line (otherwise empty BOM)
         any_line = session.exec(
             select(main.BomLine).where(main.BomLine.id_bom == bom_id).limit(1)
         ).first()
         if any_line is None:
             return (False, "La BOM est vide.", None)
 
-        # Flatten hierarchique -> {part_id: total_qty}
+        # Hierarchical flatten -> {part_id: total_qty}
         try:
             totals = main._flatten_bom(session, bom_id, factor=factor)
         except Exception as e:
             return (False, f"Erreur lors du calcul : {e}", None)
 
         if direction == "sub":
-            # Verification atomique sur les pieces feuilles
+            # Atomic check on the leaf parts
             shortages = []
             for part_id, needed in totals.items():
                 stock = session.exec(
@@ -765,7 +764,7 @@ def bom_stock_apply(bom_id: int, factor: int, direction: str):
             if shortages:
                 return (False, "Stock insuffisant.", shortages)
 
-        # Application des changements aux pieces feuilles
+        # Apply the changes to the leaf parts
         for part_id, qty in totals.items():
             stock = main._get_or_create_stock(session, part_id)
             delta = qty if direction == "add" else -qty
@@ -776,7 +775,7 @@ def bom_stock_apply(bom_id: int, factor: int, direction: str):
         return (True, f"BOM {verb} ×{factor}.", None)
 
 
-# Note : la sauvegarde des photos de stock se fait via l'endpoint REST
-# POST /api/v1/parts/{id}/stock-photo dans main.py, appele directement
-# par le JS du navigateur (fetch). On n'a pas besoin d'une version
-# Python ici, ce qui evite aussi de dupliquer la logique de chemins.
+# Note: saving stock photos is done via the REST endpoint
+# POST /api/v1/parts/{id}/stock-photo in main.py, called directly
+# by the browser JS (fetch). We don't need a Python version here,
+# which also avoids duplicating the path-handling logic.

@@ -1,4 +1,4 @@
-# PiStock — pages NiceGUI (dashboard, part, plugins).
+# PiStock — NiceGUI pages (dashboard, part, plugins).
 #
-# Importer un module de ce package suffit a enregistrer ses pages aupres
-# de NiceGUI (via les decorateurs @ui.page). C'est ce que fait ui.py.
+# Importing a module from this package is enough to register its pages
+# with NiceGUI (via the @ui.page decorators). That is what ui.py does.

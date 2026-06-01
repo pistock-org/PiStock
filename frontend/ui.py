@@ -15,49 +15,49 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Point d'entree de l'interface NiceGUI de PiStock.
+Entry point for PiStock's NiceGUI interface.
 
-Ce fichier est volontairement MINCE. L'UI a ete decoupee en :
-  - app_core.py          -> helpers transverses (langue, PWA, lien source)
-  - components/header.py -> en-tete commun
-  - components/admin.py  -> session + dialogues admin
-  - db.py                -> couche d'acces a la base de donnees
-  - pages/dashboard.py   -> page catalogue "/"
-  - pages/part.py        -> page detail/viewer "/part/{id}"
-  - pages/plugins.py     -> chargement des plugins + page "/plugins"
+This file is intentionally THIN. The UI has been split into:
+  - app_core.py          -> cross-cutting helpers (language, PWA, source link)
+  - components/header.py -> common header
+  - components/admin.py  -> admin session + dialogs
+  - db.py                -> database access layer
+  - pages/dashboard.py   -> catalog page "/"
+  - pages/part.py        -> detail/viewer page "/part/{id}"
+  - pages/plugins.py     -> plugin loading + page "/plugins"
 
-S'attache au MEME FastAPI 'app' que les endpoints REST (defini dans
-backend/app/main.py) : les pages @ui.page sont servies a la racine du
-meme serveur. L'acces a la base se fait directement via les modeles
-SQLModel (pas de HTTP interne) — cf. db.py.
+Attaches to the SAME FastAPI 'app' as the REST endpoints (defined in
+backend/app/main.py): the @ui.page pages are served at the root of the
+same server. Database access goes directly through the SQLModel models
+(no internal HTTP) — see db.py.
 
-Pages :
-  /              -> catalogue (liste des pieces)
-  /part/{id}     -> viewer 3D d'une piece
-  /plugins       -> index des plugins
+Pages:
+  /              -> catalog (list of parts)
+  /part/{id}     -> 3D viewer of a part
+  /plugins       -> plugin index
 """
 from nicegui import ui
 
-# Importer les modules de pages suffit a enregistrer leurs @ui.page
-# aupres de NiceGUI. L'ordre n'a pas d'importance.
-import pages.dashboard  # noqa: F401  (enregistre "/")
-import pages.part       # noqa: F401  (enregistre "/part/{id}")
-import pages.plugins    # noqa: F401  (enregistre "/plugins")
+# Importing the page modules is enough to register their @ui.page with
+# NiceGUI. The order does not matter.
+import pages.dashboard  # noqa: F401  (registers "/")
+import pages.part       # noqa: F401  (registers "/part/{id}")
+import pages.plugins    # noqa: F401  (registers "/plugins")
 from pages.plugins import _load_plugins
 
 
 # ======================================================================
-#  DEMARRAGE
+#  STARTUP
 # ======================================================================
-# Branche NiceGUI sur le FastAPI 'app' defini dans main.py. Nos pages
-# @ui.page sont alors accessibles a la racine du meme serveur.
-# 'storage_secret' est obligatoire des qu'on utilise ui.storage.user ;
-# on le fournit par precaution meme si on ne s'en sert pas ici.
+# Wires NiceGUI into the FastAPI 'app' defined in main.py. Our @ui.page
+# pages are then accessible at the root of the same server.
+# 'storage_secret' is mandatory as soon as ui.storage.user is used; we
+# provide it as a precaution even though we don't use it here.
 import main as _main_module
 
-# Chargement des plugins AVANT ui.run_with : les @ui.page declarees
-# dans les plugins ne sont prises en compte que si elles sont
-# enregistrees avant le demarrage du serveur.
+# Load the plugins BEFORE ui.run_with: the @ui.page declared in the
+# plugins are only taken into account if they are registered before the
+# server starts.
 _load_plugins(_main_module.app)
 
 ui.run_with(_main_module.app,

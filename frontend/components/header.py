@@ -14,8 +14,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""En-tete commun a toutes les pages : titre, bouton accueil/refresh,
-indicateur admin, selecteur de langue et lien source AGPLv3.
+"""Header common to all pages: title, home/refresh button, admin
+indicator, language selector and AGPLv3 source link.
 """
 from nicegui import ui, app
 from i18n import _, get_lang, AVAILABLE_LANGS
@@ -24,51 +24,51 @@ from components.admin import (_admin_configured, _session_admin_active, _clear_s
 
 
 def render_app_header(title_key: str, show_home: bool = False):
-    """En-tete commun aux pages : titre a gauche, sélecteur de langue
-    et lien vers le code source a droite (obligation AGPLv3).
+    """Header common to all pages: title on the left, language selector
+    and link to the source code on the right (AGPLv3 obligation).
 
-    'title_key' est un msgid qui sera traduit via _().
-    'show_home' affiche un bouton 🏠 vers le catalogue (par defaut
-    False : la page catalogue elle-meme ne doit pas l'afficher)."""
+    'title_key' is a msgid that will be translated via _().
+    'show_home' shows a 🏠 button to the catalog (defaults to False:
+    the catalog page itself must not display it)."""
     with ui.header().classes("bg-stone-800 text-white shadow"):
         with ui.row().classes("w-full items-center no-wrap gap-3"):
             ui.label(_(title_key)).classes("text-xl font-medium")
             ui.element("div").classes("flex-grow")  # spacer
 
-            # --- Bouton retour catalogue (pages secondaires uniquement)
+            # --- Back-to-catalog button (secondary pages only)
             if show_home:
                 ui.button(icon="home",
                            on_click=lambda: ui.navigate.to("/")) \
                     .props("flat round dense color=white") \
-                    .tooltip("Retour au catalogue")
+                    .tooltip(_("Back to catalog"))
 
-            # --- Bouton actualiser (toutes les pages) -----------------
-            # Recharge la page courante. Plus simple pour l'utilisateur
-            # final qu'un F5 et ne perd pas la navigation (URL inchangee).
+            # --- Refresh button (all pages) ---------------------------
+            # Reloads the current page. Simpler for the end user than F5
+            # and does not lose the navigation (URL unchanged).
             ui.button(icon="refresh",
                        on_click=lambda: ui.navigate.reload()) \
                 .props("flat round dense color=white") \
-                .tooltip("Actualiser la page")
+                .tooltip(_("Refresh the page"))
 
-            # --- Indicateur admin ---------------------------------
-            # 3 etats visuels :
-            #   - admin actif         -> icone verte + menu (change mdp, logout)
-            #   - admin configure inactif -> icone grise, ouvre le login
-            #   - aucun admin configure  -> rien (le setup s'ouvre tout seul)
+            # --- Admin indicator ---------------------------------
+            # 3 visual states:
+            #   - admin active            -> green icon + menu (change pwd, logout)
+            #   - admin configured, inactive -> grey icon, opens the login
+            #   - no admin configured     -> nothing (the setup opens by itself)
             if _admin_configured():
                 if _session_admin_active():
                     with ui.button(icon="admin_panel_settings") \
                             .props("flat round dense color=green-3") \
-                            .tooltip("Session admin active"):
+                            .tooltip(_("Admin session active")):
                         with ui.menu():
                             ui.menu_item(
-                                "Changer le mot de passe",
+                                _("Change password"),
                                 on_click=_open_admin_change_password_dialog)
                             ui.menu_item(
-                                "Déconnecter l\'admin",
+                                _("Log out admin"),
                                 on_click=lambda: (
                                     _clear_session_admin(),
-                                    ui.notify("Session admin terminée.",
+                                    ui.notify(_("Admin session ended."),
                                                type="info"),
                                     ui.navigate.reload(),
                                 ))
@@ -78,25 +78,25 @@ def render_app_header(title_key: str, show_home: bool = False):
                         on_click=lambda: _open_admin_login_dialog(
                             on_success=lambda: ui.navigate.reload()),
                     ).props("flat round dense color=grey-5") \
-                     .tooltip("Se connecter comme admin")
+                     .tooltip(_("Log in as admin"))
 
-            # --- Selecteur de langue --------------------------------
-            # Toggle EN/FR. Au changement : on stocke la preference
-            # cote navigateur et on recharge la page pour appliquer.
+            # --- Language selector --------------------------------
+            # EN/FR toggle. On change: store the preference on the
+            # browser side and reload the page to apply it.
             current = get_lang()
             lang_options = {code: code.upper()
                              for code, _label in AVAILABLE_LANGS}
 
             def on_lang_change(e):
                 new_lang = e.value
-                # app.storage.user (cote serveur) au lieu de
-                # app.storage.browser (cookie signe, read-only hors
-                # construction de reponse HTTP).
+                # app.storage.user (server side) instead of
+                # app.storage.browser (signed cookie, read-only outside
+                # HTTP response construction).
                 app.storage.user["lang"] = new_lang
-                # Reload pour reconstruire toute la page dans la
-                # nouvelle langue. Plus simple et fiable qu'un rebuild
-                # incremental qui demanderait de tracker tous les
-                # widgets contenant du texte.
+                # Reload to rebuild the whole page in the new language.
+                # Simpler and more reliable than an incremental rebuild
+                # that would require tracking every widget containing
+                # text.
                 ui.navigate.reload()
 
             ui.toggle(lang_options, value=current,

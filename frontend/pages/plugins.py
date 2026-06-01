@@ -14,8 +14,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Chargement dynamique des plugins (scan de plugins/) et page index
-(/plugins) affichant la grille des plugins charges.
+"""Dynamic plugin loading (scan of plugins/) and index page
+(/plugins) displaying the grid of loaded plugins.
 """
 import json
 import importlib.util as _importlib_util
@@ -26,30 +26,30 @@ from app_core import (_apply_user_lang, _register_pwa)
 from components.header import render_app_header
 
 
-# Dossier 'plugins/' a la racine du projet (au meme niveau que
-# frontend/ et backend/). Resolu depuis ce fichier pour etre agnostique
-# du cwd. Ce module vit dans frontend/pages/, d'ou les trois '.parent'
-# (pages -> frontend -> racine du depot).
+# 'plugins/' folder at the root of the project (at the same level as
+# frontend/ and backend/). Resolved from this file to be agnostic of
+# the cwd. This module lives in frontend/pages/, hence the three
+# '.parent' (pages -> frontend -> repo root).
 PLUGINS_DIR = Path(__file__).resolve().parent.parent.parent / "plugins"
 
-# Liste globale des manifests des plugins charges avec succes. Utilisee
-# par la page /plugins pour afficher la grille de cartes.
+# Global list of the manifests of successfully loaded plugins. Used
+# by the /plugins page to display the grid of cards.
 PLUGINS_LIST: list[dict] = []
 
 
 def _load_plugins(fastapi_app):
-    """Scanne PLUGINS_DIR et charge chaque plugin valide. Erreurs
-    individuelles loggees mais non bloquantes (un plugin foireux ne
-    doit pas empecher le reste du systeme de demarrer)."""
+    """Scans PLUGINS_DIR and loads each valid plugin. Individual errors
+    are logged but non-blocking (a broken plugin must not prevent the
+    rest of the system from starting)."""
     global PLUGINS_LIST
     PLUGINS_LIST = []
     if not PLUGINS_DIR.is_dir():
-        print(f"ℹ️  Pas de dossier plugins/ a {PLUGINS_DIR}, aucun "
-              f"plugin charge.")
+        print(f"ℹ️  No plugins/ folder at {PLUGINS_DIR}, no "
+              f"plugin loaded.")
         return
     for plugin_dir in sorted(PLUGINS_DIR.iterdir()):
-        # On ignore les fichiers, les dossiers caches (_*, .*), et
-        # les __pycache__ Python.
+        # We ignore files, hidden folders (_*, .*), and Python
+        # __pycache__ directories.
         if not plugin_dir.is_dir():
             continue
         if plugin_dir.name.startswith(("_", ".")):
@@ -57,25 +57,25 @@ def _load_plugins(fastapi_app):
         manifest_path = plugin_dir / "manifest.json"
         plugin_py = plugin_dir / "plugin.py"
         if not manifest_path.is_file() or not plugin_py.is_file():
-            print(f"⚠️  {plugin_dir.name} : manifest.json ou plugin.py "
-                  f"manquant, plugin ignore.")
+            print(f"⚠️  {plugin_dir.name} : manifest.json or plugin.py "
+                  f"missing, plugin ignored.")
             continue
         try:
             with open(manifest_path, "r", encoding="utf-8") as f:
                 manifest = json.load(f)
-            # Validation minimale : id, name, version obligatoires
+            # Minimal validation: id, name, version required
             for key in ("id", "name", "version"):
                 if not manifest.get(key):
                     raise ValueError(f"champ '{key}' manquant dans manifest")
-            # Charge plugin.py via un nom unique pour eviter les
-            # collisions avec d'eventuels autres modules.
+            # Load plugin.py under a unique name to avoid collisions
+            # with any other modules.
             mod_name = f"pistock_plugin_{manifest['id']}"
             spec = _importlib_util.spec_from_file_location(
                 mod_name, plugin_py)
             module = _importlib_util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            # Le plugin doit exposer register(app). C'est la qu'il
-            # enregistre ses routes et pages.
+            # The plugin must expose register(app). That is where it
+            # registers its routes and pages.
             if not hasattr(module, "register"):
                 raise ValueError("plugin.py doit definir register(app)")
             module.register(fastapi_app)
@@ -90,31 +90,31 @@ def _load_plugins(fastapi_app):
 
 @ui.page("/plugins")
 def plugins_index_page():
-    """Page d'index des plugins : une grille de cartes cliquables.
-    Chaque carte renvoie vers /plugin/<id>. Si aucun plugin n'est
-    installe, on affiche un message d'aide."""
+    """Plugin index page: a grid of clickable cards. Each card links
+    to /plugin/<id>. If no plugin is installed, a help message is
+    displayed."""
     _apply_user_lang()
     _register_pwa()
-    ui.page_title("PiStock — Plugins")
-    render_app_header("Plugins", show_home=True)
+    ui.page_title(_("PiStock — Plugins"))
+    render_app_header(_("Plugins"), show_home=True)
 
     with ui.column().classes("max-w-5xl mx-auto p-4 w-full gap-4"):
         if not PLUGINS_LIST:
             with ui.card().classes("w-full p-8 text-center"):
                 ui.label("🧩").classes("text-5xl mb-2")
-                ui.label("Aucun plugin installé") \
+                ui.label(_("No plugin installed")) \
                     .classes("text-lg font-medium")
-                ui.label("Glissez un plugin dans le dossier 'plugins/' "
-                         "à la racine du projet, puis redémarrez le "
-                         "serveur.").classes("text-sm text-gray-500 max-w-md mx-auto")
+                ui.label(_("Drop a plugin into the 'plugins/' folder "
+                         "at the project root, then restart the "
+                         "server.")).classes("text-sm text-gray-500 max-w-md mx-auto")
             return
 
-        ui.label(f"{len(PLUGINS_LIST)} plugin(s) installé(s)") \
+        ui.label(_("{count} plugin(s) installed").format(count=len(PLUGINS_LIST))) \
             .classes("text-sm text-gray-500")
 
         with ui.row().classes("gap-4 flex-wrap justify-start"):
             for plugin in PLUGINS_LIST:
-                # Card cliquable : navigate vers la page du plugin
+                # Clickable card: navigate to the plugin page
                 pid = plugin["id"]
                 def make_navigator(target=pid):
                     return lambda: ui.navigate.to(f"/plugin/{target}")
@@ -135,4 +135,4 @@ def plugins_index_page():
                             "text-gray-400"):
                         ui.label(f"v{plugin['version']}")
                         if plugin.get("author"):
-                            ui.label(f"par {plugin['author']}")
+                            ui.label(_("by {author}").format(author=plugin['author']))

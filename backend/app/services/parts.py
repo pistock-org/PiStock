@@ -15,13 +15,13 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Endpoints PIECES : liste (simple et enrichie), detail, creation manuelle,
-actions (projet / statut / verrou), revisions PLM (liste, suppression,
-set-main) et upload d'une nouvelle revision depuis FreeCAD.
+PARTS endpoints: listing (simple and enriched), detail, manual creation,
+actions (project / status / lock), PLM revisions (list, deletion,
+set-main) and upload of a new revision from FreeCAD.
 
-ATTENTION A L'ORDRE des routes : `/api/v1/parts/full` est declaree AVANT
-`/api/v1/parts/{part_id}` pour ne pas etre captee par le parametre de
-chemin. On conserve donc l'ordre de declaration d'origine.
+MIND THE ORDER of the routes: `/api/v1/parts/full` is declared BEFORE
+`/api/v1/parts/{part_id}` so that it is not captured by the path
+parameter. The original declaration order is therefore preserved.
 """
 import os
 import traceback
@@ -42,11 +42,11 @@ router = APIRouter()
 
 @router.get("/api/v1/parts")
 def list_parts():
-    """Liste enrichie (id + nom + projet + verrou) — utilise par le
-    GUI de la macro FreeCAD pour filtrer par projet et bloquer les
-    selections de pieces verrouillees."""
+    """Enriched listing (id + name + project + lock) — used by the
+    FreeCAD macro GUI to filter by project and block the selection of
+    locked parts."""
     with Session(engine) as session:
-        # Pre-charger les codes projet pour eviter une requete par piece
+        # Preload the project codes to avoid one query per part
         projects_by_id = {
             p.id: p.code
             for p in session.exec(select(Project)).all()
@@ -66,24 +66,24 @@ def list_parts():
 
 @router.get("/api/v1/parts/full")
 def list_parts_full(project_code: str | None = None):
-    """Liste enrichie pour le dashboard frontend.
-    Pour chaque piece : derniere revision PLM, infos de stock,
-    projet associe, statut, verrou. Filtre optionnel par 'project_code'."""
+    """Enriched listing for the frontend dashboard.
+    For each part: latest PLM revision, stock info, associated project,
+    status, lock. Optional filter by 'project_code'."""
     with Session(engine) as session:
-        # Construction de la requete avec filtre optionnel
+        # Build the query with an optional filter
         query = select(Parts).order_by(Parts.part_name)
         if project_code:
-            # Resoudre le code projet en id pour le where
+            # Resolve the project code into an id for the where clause
             project = session.exec(
                 select(Project).where(Project.code == project_code)
             ).first()
             if project is None:
-                return []  # code projet inexistant -> liste vide
+                return []  # non-existent project code -> empty list
             query = query.where(Parts.id_project == project.id)
         parts = session.exec(query).all()
 
-        # Pre-charger TOUS les projets dans un dict {id: code}
-        # pour eviter une requete par piece.
+        # Preload ALL the projects into a dict {id: code} to avoid one
+        # query per part.
         projects_by_id = {
             p.id: p.code
             for p in session.exec(select(Project)).all()
@@ -91,8 +91,8 @@ def list_parts_full(project_code: str | None = None):
 
         result = []
         for p in parts:
-            # "Revision courante" : is_main si marquee, sinon la
-            # plus recente par timestamp (cf. _get_current_plm).
+            # "Current revision": is_main if flagged, otherwise the
+            # most recent one by timestamp (see _get_current_plm).
             latest_plm = _get_current_plm(session, p.id)
 
             stock_row = session.exec(
@@ -102,13 +102,13 @@ def list_parts_full(project_code: str | None = None):
             result.append({
                 "id": p.id,
                 "part_name": p.part_name,
-                # Champs ajoutes
+                # Added fields
                 "id_project": p.id_project,
                 "project_code": projects_by_id.get(p.id_project),
                 "status": p.status,
                 "locked": p.locked,
                 "version": latest_plm.version if latest_plm else None,
-                # URLs des fichiers PLM (relatives a la racine du serveur)
+                # PLM file URLs (relative to the server root)
                 "thumbnail_url": (
                     f"/{latest_plm.path_2_thumbnail}"
                     if latest_plm and latest_plm.path_2_thumbnail else None
@@ -117,8 +117,8 @@ def list_parts_full(project_code: str | None = None):
                     f"/{latest_plm.path_2_3dglb}"
                     if latest_plm and latest_plm.path_2_3dglb else None
                 ),
-                # URL du fichier CAO (.FCStd) : utilise par PiStock Explorer
-                # pour telecharger et ouvrir la piece dans FreeCAD.
+                # CAD file URL (.FCStd): used by PiStock Explorer to
+                # download and open the part in FreeCAD.
                 "cad_url": (
                     f"/{latest_plm.path_2_cadfile}"
                     if latest_plm and latest_plm.path_2_cadfile else None
@@ -145,7 +145,7 @@ def list_parts_full(project_code: str | None = None):
 
 @router.get("/api/v1/parts/{part_id}")
 def get_part(part_id: int):
-    """Détail d'une pièce (utilisé par la page viewer 3D)."""
+    """Detail of a part (used by the 3D viewer page)."""
     with Session(engine) as session:
         p = session.get(Parts, part_id)
         if p is None:
@@ -171,23 +171,23 @@ def get_part(part_id: int):
 
 @router.post("/api/v1/parts")
 def create_part_manual(part_name: str = Form(...)):
-    """Crée une pièce SANS passer par la CAO (pas de fichiers).
-    Utilisé par le bouton "+ Nouvelle pièce" du dashboard.
-    L'id est attribué automatiquement par SQLite."""
+    """Creates a part WITHOUT going through CAD (no files).
+    Used by the dashboard's "+ Nouvelle pièce" button.
+    The id is assigned automatically by SQLite."""
     part_name = part_name.strip()
     if not part_name:
         raise HTTPException(status_code=400,
                             detail="Le nom de la pièce est obligatoire.")
 
     with Session(engine) as session:
-        # On verifie l'unicite du nom avant insertion (sinon on aurait
-        # une IntegrityError peu parlante a renvoyer au frontend).
+        # Check the name's uniqueness before insertion (otherwise we
+        # would get an unhelpful IntegrityError to return to the frontend).
         existing = session.exec(
             select(Parts).where(Parts.part_name == part_name)
         ).first()
         if existing:
             raise HTTPException(
-                status_code=409,  # 409 Conflict = ressource existe deja
+                status_code=409,  # 409 Conflict = resource already exists
                 detail=f"Une pièce nommée '{part_name}' existe déjà "
                        f"(id={existing.id}).",
             )
@@ -205,10 +205,10 @@ def create_part_manual(part_name: str = Form(...)):
 
 
 # ----------------------------------------------------------------------
-#  ACTIONS PAR PIECE : projet / status / verrou
+#  PER-PART ACTIONS: project / status / lock
 # ----------------------------------------------------------------------
-# Toutes ces actions verifient le verrou (sauf le toggle du verrou
-# lui-meme, evidemment). Si la piece est verrouillee, on renvoie 423.
+# All these actions check the lock (except the lock toggle itself, of
+# course). If the part is locked, we return 423.
 
 VALID_STATUSES = {"Init", "Revue", "Asset"}
 
@@ -225,8 +225,8 @@ def _check_not_locked(part: Parts):
 @router.post("/api/v1/parts/{part_id}/assign-project")
 def assign_project(part_id: int,
                     project_id: int | None = Form(default=None)):
-    """Associe (ou dissocie si project_id est null/absent) une piece
-    a un projet. Refuse si la piece est verrouillee."""
+    """Associates a part with a project (or dissociates it if project_id
+    is null/absent). Rejected if the part is locked."""
     with Session(engine) as session:
         part = session.get(Parts, part_id)
         if part is None:
@@ -249,8 +249,8 @@ def assign_project(part_id: int,
 
 @router.post("/api/v1/parts/{part_id}/status")
 def set_part_status(part_id: int, new_status: str = Form(...)):
-    """Change le statut d'une piece (Init / Revue / Asset).
-    Refuse si la piece est verrouillee."""
+    """Changes a part's status (Init / Revue / Asset).
+    Rejected if the part is locked."""
     if new_status not in VALID_STATUSES:
         raise HTTPException(
             status_code=400,
@@ -274,16 +274,16 @@ def toggle_part_lock(
     locked: bool = Form(...),
     x_admin_password: str | None = Header(default=None),
 ):
-    """Toggle le verrou d'une piece. Pas de protection vs lui-meme :
-    le verrou peut toujours etre modifie (sinon il serait impossible
-    de le retirer une fois pose)."""
+    """Toggles a part's lock. No self-protection: the lock can always
+    be modified (otherwise it would be impossible to remove it once
+    set)."""
     with Session(engine) as session:
         part = session.get(Parts, part_id)
         if part is None:
             raise HTTPException(status_code=404, detail="Pièce introuvable.")
         new_locked = bool(locked)
-        # Le DEVERROUILLAGE exige une auth admin ; le verrouillage
-        # reste libre (lock-down rapide en cas de besoin).
+        # UNLOCKING requires admin auth; locking remains open
+        # (quick lock-down when needed).
         if part.locked and not new_locked:
             _check_admin_password(x_admin_password)
         part.locked = new_locked
@@ -294,12 +294,11 @@ def toggle_part_lock(
 
 @router.get("/api/v1/last-used-project")
 def get_last_used_project():
-    """Renvoie le projet de la PIECE creee le plus recemment qui a
-    un projet associe. Utilise par l'UI pour pre-selectionner un
-    projet quand on en assigne un a une nouvelle piece. None si
-    aucune piece n'a encore de projet."""
+    """Returns the project of the most recently created PART that has
+    an associated project. Used by the UI to pre-select a project when
+    assigning one to a new part. None if no part has a project yet."""
     with Session(engine) as session:
-        # 'id DESC' = ordre de creation inverse (id auto-incremente)
+        # 'id DESC' = reverse creation order (auto-incremented id)
         part = session.exec(
             select(Parts)
             .where(Parts.id_project.is_not(None))
@@ -315,13 +314,13 @@ def get_last_used_project():
 
 
 # ----------------------------------------------------------------------
-#  ENDPOINTS REVISIONS PLM (liste, suppression, set-main)
+#  PLM REVISION ENDPOINTS (list, deletion, set-main)
 # ----------------------------------------------------------------------
 @router.get("/api/v1/parts/{part_id}/revisions")
 def list_part_revisions(part_id: int):
-    """Liste toutes les revisions PLM d'une piece, de la plus recente
-    a la plus ancienne. Marque celle qui est "courante" (is_main si
-    elle existe, sinon la plus recente)."""
+    """Lists all the PLM revisions of a part, from the most recent to
+    the oldest. Marks the one that is "current" (is_main if it exists,
+    otherwise the most recent)."""
     with Session(engine) as session:
         part = session.get(Parts, part_id)
         if part is None:
@@ -354,9 +353,9 @@ def list_part_revisions(part_id: int):
 @router.delete("/api/v1/plm/{plm_id}")
 def delete_plm_revision(plm_id: int,
                          _admin: None = Depends(_require_admin)):
-    """Supprime une revision PLM : la ligne en base ET les fichiers
-    associes sur disque (.FCStd, .glb, .png). Refuse si la piece
-    est verrouillee."""
+    """Deletes a PLM revision: the database row AND the associated
+    files on disk (.FCStd, .glb, .png). Rejected if the part is
+    locked."""
     with Session(engine) as session:
         plm = session.get(PLM, plm_id)
         if plm is None:
@@ -366,8 +365,8 @@ def delete_plm_revision(plm_id: int,
         if part is not None:
             _check_not_locked(part)
 
-        # Supprimer les fichiers AVANT de detruire la ligne, pour
-        # avoir les chemins disponibles.
+        # Delete the files BEFORE destroying the row, so the paths
+        # remain available.
         _delete_file_if_exists(plm.path_2_cadfile)
         _delete_file_if_exists(plm.path_2_thumbnail)
         _delete_file_if_exists(plm.path_2_3dglb)
@@ -381,14 +380,14 @@ def delete_plm_revision(plm_id: int,
 @router.delete("/api/v1/parts/{part_id}")
 def delete_part(part_id: int,
                 _admin: None = Depends(_require_admin)):
-    """Supprime DEFINITIVEMENT une piece de la base :
-    - Refus (409) si la piece est referencee dans une ou plusieurs BOMs
-      (avec la liste des BOMs concernees dans le detail)
-    - Sinon : supprime toutes les revisions PLM associees (avec leurs
-      fichiers : .FCStd, .glb, .png thumb), l'entree Stock (avec sa
-      photo et son doc), puis la Part elle-meme.
-    Les fichiers manquants sur disque sont logges mais ne bloquent pas
-    l'operation (idempotence)."""
+    """PERMANENTLY deletes a part from the database:
+    - Rejected (409) if the part is referenced in one or more BOMs
+      (with the list of the BOMs concerned in the detail)
+    - Otherwise: deletes all the associated PLM revisions (with their
+      files: .FCStd, .glb, .png thumb), the Stock entry (with its photo
+      and its doc), then the Part itself.
+    Files missing on disk are logged but do not block the operation
+    (idempotence)."""
     with Session(engine) as session:
         part = session.get(Parts, part_id)
         if part is None:
@@ -397,9 +396,9 @@ def delete_part(part_id: int,
                 detail=f"Pièce id={part_id} introuvable."
             )
 
-        # Verification : la piece est-elle utilisee dans une BOM ?
-        # On regarde les BomLine qui pointent vers cette piece (en tant
-        # que id_parts, pas en tant que id_subbom evidemment).
+        # Check: is the part used in a BOM? We look at the BomLine rows
+        # that point to this part (as id_parts, not as id_subbom of
+        # course).
         used_in = session.exec(
             select(Bom).join(BomLine, BomLine.id_bom == Bom.id)
             .where(BomLine.id_parts == part_id)
@@ -420,7 +419,7 @@ def delete_part(part_id: int,
                 }
             )
 
-        # Suppression en cascade des revisions PLM (+ fichiers physiques)
+        # Cascade deletion of the PLM revisions (+ physical files)
         plm_rows = session.exec(
             select(PLM).where(PLM.id_parts == part_id)
         ).all()
@@ -430,7 +429,7 @@ def delete_part(part_id: int,
             _delete_file_if_exists(plm.path_2_3dglb)
             session.delete(plm)
 
-        # Suppression de la ligne Stock (+ photo + doc)
+        # Deletion of the Stock row (+ photo + doc)
         stock = session.exec(
             select(Stock).where(Stock.id_parts == part_id)
         ).first()
@@ -439,7 +438,7 @@ def delete_part(part_id: int,
             _delete_file_if_exists(stock.path_2_doc)
             session.delete(stock)
 
-        # Suppression de la Part elle-meme
+        # Deletion of the Part itself
         part_name = part.part_name
         session.delete(part)
         session.commit()
@@ -459,9 +458,9 @@ def delete_part(part_id: int,
 
 @router.post("/api/v1/plm/{plm_id}/set-main")
 def set_plm_main(plm_id: int):
-    """Marque cette revision comme "principale" (is_main=True) et
-    deflaggent toutes les autres revisions de la meme piece. Refuse
-    si la piece est verrouillee."""
+    """Marks this revision as "main" (is_main=True) and clears the flag
+    on all the other revisions of the same part. Rejected if the part
+    is locked."""
     with Session(engine) as session:
         plm = session.get(PLM, plm_id)
         if plm is None:
@@ -471,8 +470,8 @@ def set_plm_main(plm_id: int):
         if part is not None:
             _check_not_locked(part)
 
-        # Reset is_main sur toutes les autres revisions de cette piece,
-        # puis flagger celle-ci. Tout dans la meme transaction.
+        # Reset is_main on all the other revisions of this part, then
+        # flag this one. All in the same transaction.
         others = session.exec(
             select(PLM)
             .where(PLM.id_parts == plm.id_parts)
@@ -506,11 +505,11 @@ async def upload_new_part(
                        "existante), soit 'part_name' (nouvelle pièce).",
             )
 
-        # --- PRE-CHECK : verrou ---------------------------------------
-        # On verifie le verrou AVANT de sauver les fichiers : eviter
-        # d'ecrire des fichiers orphelins si la piece est verrouillee.
-        # Couvre les deux cas : part_id direct OU part_name qui matche
-        # une piece existante (fallback de reutilisation).
+        # --- PRE-CHECK: lock ------------------------------------------
+        # Check the lock BEFORE saving the files: avoid writing orphan
+        # files if the part is locked. Covers both cases: a direct
+        # part_id OR a part_name that matches an existing part
+        # (reuse fallback).
         with Session(engine) as quick_session:
             target_part = None
             if part_id is not None:
@@ -524,7 +523,7 @@ async def upload_new_part(
                 target_part = quick_session.exec(
                     select(Parts).where(Parts.part_name == part_name)
                 ).first()
-                # Si target_part est None, c'est une nouvelle piece -> OK
+                # If target_part is None, it's a new part -> OK
             if target_part is not None and target_part.locked:
                 raise HTTPException(
                     status_code=423,  # 423 Locked
@@ -584,9 +583,9 @@ async def upload_new_part(
                     logger.info(f"Nouvelle pièce '{part_name}' "
                                 f"créée (id={part.id}).")
 
-            # Calcul de la prochaine version PLM pour cette piece.
-            # Doit etre fait APRES le flush (pour que part.id existe)
-            # mais AVANT la creation de la ligne PLM.
+            # Compute the next PLM version for this part. Must be done
+            # AFTER the flush (so that part.id exists) but BEFORE
+            # creating the PLM row.
             new_version = _next_version_for_part(session, part.id)
 
             new_plm = PLM(

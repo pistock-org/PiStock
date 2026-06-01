@@ -15,22 +15,21 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
-Authentification admin (mot de passe singleton) + endpoints /admin/*.
+Admin authentication (singleton password) + /admin/* endpoints.
 
-Le compte admin est unique. Mot de passe stocke en PBKDF2-HMAC-SHA256
-(200_000 iter, sel aleatoire 16 octets). Uniquement stdlib, aucune
-dependance ajoutee.
+The admin account is unique. The password is stored as PBKDF2-HMAC-SHA256
+(200_000 iter, random 16-byte salt). Stdlib only, no added dependency.
 
-  - Cree au premier demarrage via POST /api/v1/admin/setup
-    (refuse si un admin existe deja).
-  - Renouvelable via POST /api/v1/admin/change-password (necessite
-    l'ancien mot de passe).
+  - Created on first startup via POST /api/v1/admin/setup
+    (refused if an admin already exists).
+  - Renewable via POST /api/v1/admin/change-password (requires the old
+    password).
 
-Les endpoints destructifs (DELETE *) et le DEVERROUILLAGE d'une piece
-exigent le header HTTP `X-Admin-Password`. Suffisant en LAN avec HTTPS
-(cert auto-signe) ; pour de l'expose internet, prevoir un vrai jeton de
-session. Les helpers `_check_admin_password` (en code) et `_require_admin`
-(dependance FastAPI) sont reutilises par les autres services.
+The destructive endpoints (DELETE *) and the UNLOCKING of a part require
+the HTTP header `X-Admin-Password`. Sufficient on a LAN with HTTPS
+(self-signed cert); for internet exposure, plan for a real session
+token. The helpers `_check_admin_password` (in code) and `_require_admin`
+(FastAPI dependency) are reused by the other services.
 """
 import hashlib
 import secrets
@@ -52,13 +51,13 @@ def _new_salt() -> bytes:
 
 
 def _hash_password(password: str, salt: bytes) -> str:
-    """PBKDF2-HMAC-SHA256, retourne le hash en hex."""
+    """PBKDF2-HMAC-SHA256, returns the hash in hex."""
     return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
                                  salt, PBKDF2_ITER).hex()
 
 
 def _verify_password(password: str, salt_hex: str, hash_hex: str) -> bool:
-    """Comparaison en temps constant (anti timing-attack)."""
+    """Constant-time comparison (anti timing-attack)."""
     expected = _hash_password(password, bytes.fromhex(salt_hex))
     return secrets.compare_digest(expected, hash_hex)
 
@@ -68,10 +67,9 @@ def _get_admin(session: Session):
 
 
 def _check_admin_password(password):
-    """Valide un mot de passe admin. Leve 401/403/503 sinon.
-    Utile en code (verifications conditionnelles, ex. deverrouillage).
-    Pour proteger un endpoint entier, utiliser plutot _require_admin
-    en Depends."""
+    """Validate an admin password. Raises 401/403/503 otherwise.
+    Useful in code (conditional checks, e.g. unlocking). To protect an
+    entire endpoint, use _require_admin in Depends instead."""
     if not password:
         raise HTTPException(
             status_code=401,
@@ -93,25 +91,25 @@ def _check_admin_password(password):
 def _require_admin(
     x_admin_password: str | None = Header(default=None),
 ) -> None:
-    """Dependance FastAPI : impose le header X-Admin-Password valide."""
+    """FastAPI dependency: requires a valid X-Admin-Password header."""
     _check_admin_password(x_admin_password)
 
 
 # ----------------------------------------------------------------------
-#  ENDPOINTS API : ADMIN (singleton, mot de passe)
+#  API ENDPOINTS: ADMIN (singleton, password)
 # ----------------------------------------------------------------------
 @router.get("/api/v1/admin/status")
 def admin_status():
-    """Indique si un compte admin existe. Utilise par l'UI pour
-    declencher le dialogue de setup au premier lancement."""
+    """Indicate whether an admin account exists. Used by the UI to
+    trigger the setup dialog on first launch."""
     with Session(engine) as session:
         return {"configured": _get_admin(session) is not None}
 
 
 @router.post("/api/v1/admin/setup")
 def admin_setup(password: str = Form(...)):
-    """Cree le compte admin au PREMIER lancement uniquement.
-    409 si un admin existe deja (utiliser change-password)."""
+    """Create the admin account on the FIRST launch only.
+    409 if an admin already exists (use change-password)."""
     if len(password) < 6:
         raise HTTPException(
             status_code=400,
@@ -134,8 +132,8 @@ def admin_setup(password: str = Form(...)):
 
 @router.post("/api/v1/admin/verify")
 def admin_verify(password: str = Form(...)):
-    """Verifie un mot de passe admin. Utilise par l'UI pour le login."""
-    _check_admin_password(password)   # leve 401/403/503 si invalide
+    """Verify an admin password. Used by the UI for login."""
+    _check_admin_password(password)   # raises 401/403/503 if invalid
     return {"status": "success"}
 
 
@@ -144,7 +142,7 @@ def admin_change_password(
     current_password: str = Form(...),
     new_password: str = Form(...),
 ):
-    """Renouvelle le mot de passe admin. Necessite l'ancien."""
+    """Renew the admin password. Requires the old one."""
     if len(new_password) < 6:
         raise HTTPException(
             status_code=400,
