@@ -1418,6 +1418,84 @@ def delete_plm_revision(plm_id: int):
         return {"status": "success", "deleted_id": plm_id}
 
 
+@app.delete("/api/v1/parts/{part_id}")
+def delete_part(part_id: int):
+    """Supprime DEFINITIVEMENT une piece de la base :
+    - Refus (409) si la piece est referencee dans une ou plusieurs BOMs
+      (avec la liste des BOMs concernees dans le detail)
+    - Sinon : supprime toutes les revisions PLM associees (avec leurs
+      fichiers : .FCStd, .glb, .png thumb), l'entree Stock (avec sa
+      photo et son doc), puis la Part elle-meme.
+    Les fichiers manquants sur disque sont logges mais ne bloquent pas
+    l'operation (idempotence)."""
+    with Session(engine) as session:
+        part = session.get(Parts, part_id)
+        if part is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Pièce id={part_id} introuvable."
+            )
+
+        # Verification : la piece est-elle utilisee dans une BOM ?
+        # On regarde les BomLine qui pointent vers cette piece (en tant
+        # que id_parts, pas en tant que id_subbom evidemment).
+        used_in = session.exec(
+            select(Bom).join(BomLine, BomLine.id_bom == Bom.id)
+            .where(BomLine.id_parts == part_id)
+            .distinct()
+        ).all()
+        if used_in:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": (f"Impossible de supprimer la pièce "
+                                 f"'{part.part_name}' : elle est utilisée "
+                                 f"dans {len(used_in)} BOM(s)."),
+                    "boms": [
+                        {"id": b.id, "code": b.code,
+                         "description": b.description}
+                        for b in used_in
+                    ]
+                }
+            )
+
+        # Suppression en cascade des revisions PLM (+ fichiers physiques)
+        plm_rows = session.exec(
+            select(PLM).where(PLM.id_parts == part_id)
+        ).all()
+        for plm in plm_rows:
+            _delete_file_if_exists(plm.path_2_cadfile)
+            _delete_file_if_exists(plm.path_2_thumbnail)
+            _delete_file_if_exists(plm.path_2_3dglb)
+            session.delete(plm)
+
+        # Suppression de la ligne Stock (+ photo + doc)
+        stock = session.exec(
+            select(Stock).where(Stock.id_parts == part_id)
+        ).first()
+        if stock is not None:
+            _delete_file_if_exists(stock.path_2_img)
+            _delete_file_if_exists(stock.path_2_doc)
+            session.delete(stock)
+
+        # Suppression de la Part elle-meme
+        part_name = part.part_name
+        session.delete(part)
+        session.commit()
+        logger.info(
+            f"Pièce '{part_name}' (id={part_id}) supprimée "
+            f"({len(plm_rows)} révisions PLM, "
+            f"stock {'oui' if stock else 'non'})."
+        )
+        return {
+            "status": "success",
+            "deleted_id": part_id,
+            "deleted_part_name": part_name,
+            "plm_revisions_removed": len(plm_rows),
+            "stock_removed": stock is not None,
+        }
+
+
 @app.post("/api/v1/plm/{plm_id}/set-main")
 def set_plm_main(plm_id: int):
     """Marque cette revision comme "principale" (is_main=True) et

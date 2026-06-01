@@ -652,6 +652,71 @@ def delete_bom_db(bom_id: int):
         return (True, f"BOM '{bom.code}' supprimée.")
 
 
+def delete_part_db(part_id: int):
+    """Supprime DEFINITIVEMENT une piece de la base avec cascade
+    sur PLM, Stock et fichiers physiques. Refus si la piece est
+    referencee dans une BOM.
+
+    Retourne (ok, msg, blocking_boms) ou blocking_boms est :
+    - None si suppression OK ou erreur generique
+    - liste de {id, code, description} si la piece est dans des BOMs
+    """
+    import main
+    with Session(main.engine) as session:
+        part = session.get(main.Parts, part_id)
+        if part is None:
+            return (False, "Pièce introuvable.", None)
+
+        # Verifie si referencee dans une BOM (id_parts, pas id_subbom)
+        blocking = session.exec(
+            select(main.Bom).join(
+                main.BomLine, main.BomLine.id_bom == main.Bom.id)
+            .where(main.BomLine.id_parts == part_id)
+            .distinct()
+        ).all()
+        if blocking:
+            bom_info = [
+                {"id": b.id, "code": b.code,
+                 "description": b.description or ""}
+                for b in blocking
+            ]
+            return (
+                False,
+                f"Impossible de supprimer : pièce utilisée dans "
+                f"{len(bom_info)} BOM(s).",
+                bom_info
+            )
+
+        # Cascade : revisions PLM (avec leurs fichiers)
+        plm_rows = session.exec(
+            select(main.PLM).where(main.PLM.id_parts == part_id)
+        ).all()
+        for plm in plm_rows:
+            main._delete_file_if_exists(plm.path_2_cadfile)
+            main._delete_file_if_exists(plm.path_2_thumbnail)
+            main._delete_file_if_exists(plm.path_2_3dglb)
+            session.delete(plm)
+
+        # Stock (avec photo + doc)
+        stock = session.exec(
+            select(main.Stock).where(main.Stock.id_parts == part_id)
+        ).first()
+        if stock is not None:
+            main._delete_file_if_exists(stock.path_2_img)
+            main._delete_file_if_exists(stock.path_2_doc)
+            session.delete(stock)
+
+        part_name = part.part_name
+        session.delete(part)
+        session.commit()
+        return (
+            True,
+            f"Pièce '{part_name}' supprimée ({len(plm_rows)} révision(s) "
+            f"PLM, stock {'oui' if stock else 'non'}).",
+            None
+        )
+
+
 def add_bom_line_db(bom_id: int, part_id: int | None,
                      quantity: int, subbom_id: int | None = None):
     """Ajoute une ligne BOM. Soit part_id soit subbom_id, pas les deux.
@@ -1340,6 +1405,18 @@ def render_part_row(part: dict, on_change):
                 .tooltip("Verrouillée — cliquer pour déverrouiller"
                           if locked else "Cliquer pour verrouiller")
 
+            # --- Bouton "⋯" -> dialogue d'options de la piece ------
+            # Point d'entree pour les actions moins frequentes :
+            # suppression, et plus tard renommage / duplication / etc.
+            def make_open_options(p=part):
+                def handler():
+                    open_part_options_dialog(p, on_change)
+                return handler
+            ui.button(icon="more_horiz", on_click=make_open_options()) \
+                .props("flat round dense color=grey-7") \
+                .classes("flex-shrink-0") \
+                .tooltip("Options de la pièce")
+
             # --- Nom + version (a cote) -----------------------------
             with ui.column().classes("gap-0 flex-grow"):
                 with ui.row().classes("items-baseline gap-2 no-wrap"):
@@ -1738,6 +1815,131 @@ def confirm_delete_revision(plm_id: int, version: str, on_change):
 # dialogue a la volee (un nouveau a chaque clic) qui liste les
 # projets, met en evidence le projet actuel et le "dernier utilise",
 # et permet aussi de creer un projet a la volee.
+# ======================================================================
+#  DIALOGUE : OPTIONS D'UNE PIECE (point d'entree pour suppression etc.)
+# ======================================================================
+def open_part_options_dialog(part: dict, on_change):
+    """Dialogue d'options pour une piece donnee. Contient les actions
+    moins frequentes que la simple modification (suppression, et plus
+    tard renommage, duplication, etc.). Le verrou n'empeche PAS
+    d'acceder a ce dialogue, mais empeche la suppression d'une piece
+    verrouillee (le bouton est grise dans ce cas)."""
+    with ui.dialog() as dialog, ui.card().classes("min-w-[440px]"):
+        # En-tete : nom + code projet + statut
+        ui.label("Options de la pièce") \
+            .classes("text-base font-medium text-gray-600")
+        with ui.row().classes("items-center gap-2"):
+            ui.label(part["part_name"]) \
+                .classes("text-lg font-bold")
+            if part.get("version"):
+                ui.label(part["version"]) \
+                    .classes("text-xs font-mono text-gray-500")
+        meta_bits = []
+        if part.get("project_code"):
+            meta_bits.append(f"projet {part['project_code']}")
+        if part.get("status"):
+            meta_bits.append(f"statut « {part['status']} »")
+        if part.get("locked"):
+            meta_bits.append("🔒 verrouillée")
+        if meta_bits:
+            ui.label(" • ".join(meta_bits)) \
+                .classes("text-xs text-gray-500")
+
+        ui.separator()
+
+        # --- Section "Zone dangereuse" : suppression ----------------
+        # On garde la suppression isolee visuellement (couleur rouge,
+        # alignee a droite) pour eviter les clics accidentels.
+        with ui.column().classes("w-full gap-2 mt-2"):
+            ui.label("⚠️ Zone dangereuse") \
+                .classes("text-sm font-medium text-red-600")
+            ui.label("La suppression d'une pièce efface définitivement "
+                     "ses révisions PLM, son stock et ses fichiers "
+                     "associés. Action irréversible.") \
+                .classes("text-xs text-gray-600")
+
+            def on_delete():
+                # Lance la confirmation. Si OK, l'autre dialog se chargera
+                # de l'appel API + de la notification + du refresh.
+                dialog.close()
+                confirm_delete_part(part, on_change)
+
+            ui.button("🗑 Supprimer définitivement cette pièce…",
+                       on_click=on_delete) \
+                .props("color=negative outline") \
+                .classes("self-end")
+
+        # --- Bouton fermer ------------------------------------------
+        with ui.row().classes("w-full justify-end mt-2"):
+            ui.button("Fermer", on_click=dialog.close).props("flat")
+
+    dialog.open()
+
+
+def confirm_delete_part(part: dict, on_change):
+    """Dialogue de confirmation finale pour la suppression d'une piece.
+    Affiche le nom en gras et un avertissement. Au confirmation :
+    appelle delete_part_db ; si refus pour cause de BOMs, affiche
+    la liste exhaustive en notification dedans le dialog."""
+    with ui.dialog() as dialog, ui.card().classes("min-w-[440px]"):
+        ui.label("Confirmer la suppression") \
+            .classes("text-lg font-bold")
+        ui.label(f"Vous êtes sur le point de supprimer définitivement "
+                  f"la pièce « {part['part_name']} ».") \
+            .classes("text-sm")
+        ui.label("Toutes ses révisions PLM, son stock et ses fichiers "
+                 "associés seront effacés. Cette opération est "
+                 "irréversible.") \
+            .classes("text-sm text-gray-600")
+
+        # Zone d'erreur qui sera remplie si la pièce est dans une BOM
+        error_area = ui.column().classes("w-full gap-1")
+
+        def do_delete():
+            error_area.clear()
+            ok, msg, blocking = delete_part_db(part["id"])
+            if ok:
+                ui.notify(msg, type="positive")
+                dialog.close()
+                on_change()
+                return
+            # Echec : si c'est a cause d'une BOM, on affiche la liste
+            # directement dans le dialog (pas de toast pour pouvoir
+            # lire posement).
+            if blocking:
+                with error_area:
+                    with ui.card().classes(
+                            "w-full bg-red-50 border-l-4 "
+                            "border-red-400 p-3 mt-2"):
+                        ui.label(msg).classes("text-sm font-medium "
+                                                "text-red-700")
+                        ui.label("BOMs concernées :") \
+                            .classes("text-xs text-red-600 mt-1")
+                        for b in blocking:
+                            line = f"  • {b['code']}"
+                            if b['description']:
+                                line += f" — {b['description'][:40]}"
+                            ui.label(line) \
+                                .classes("text-xs font-mono "
+                                          "text-red-600")
+                        ui.label("Retirez la pièce de ces BOMs "
+                                 "d'abord, puis réessayez.") \
+                            .classes("text-xs text-gray-600 mt-1")
+            else:
+                ui.notify(msg, type="negative")
+
+        with ui.row().classes("w-full justify-end gap-2 mt-3"):
+            ui.button("Annuler", on_click=dialog.close).props("flat")
+            ui.button("Supprimer définitivement",
+                       on_click=do_delete) \
+                .props("color=negative")
+
+    dialog.open()
+
+
+# ======================================================================
+#  DIALOGUE : ASSIGNATION DE PROJET
+# ======================================================================
 def open_assign_project_dialog(part: dict, on_change):
     projects = fetch_projects()
     last_used_id = fetch_last_used_project_id()
