@@ -1,0 +1,35 @@
+# ======================================================================
+#  PiStock — dépendances Python (serveur + interface web)
+# ======================================================================
+# Versions épinglées pour des installations reproductibles.
+#
+# Ces dépendances correspondent à celles installées par
+# backend/app/install/install.sh. Remplace la ligne
+#   pip install fastapi sqlmodel uvicorn python-multipart nicegui
+# par :
+#   pip install -r requirements.txt
+#
+# ----------------------------------------------------------------------
+#  Note sur la mise à jour
+# ----------------------------------------------------------------------
+# La référence FIABLE reste un gel depuis ta machine de test (le Pi),
+# qui capture l'arbre exact qui fonctionne chez toi :
+#     pip freeze > requirements.lock.txt
+# Garde ce fichier-ci pour les versions DIRECTES (lisible), et le .lock
+# pour la reproductibilité totale (arbre transitif compris).
+#
+# Prérequis : Python 3.10+
+# ----------------------------------------------------------------------
+
+# --- Cœur API / serveur ---
+fastapi==0.136.3
+uvicorn[standard]==0.48.0      # [standard] = websockets + uvloop + httptools (perf)
+sqlmodel==0.0.38               # tire pydantic + SQLAlchemy
+python-multipart==0.0.30       # requis par FastAPI pour Form()/UploadFile
+
+# --- Interface web ---
+nicegui==3.12.1                # 3.x : voir le contournement <model-viewer> dans ui.py
+
+# --- Transitives notables (épinglées par sécurité ; gérées par les libs ci-dessus) ---
+# pydantic==2.13.4
+# starlette==1.2.1

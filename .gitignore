@@ -71,3 +71,7 @@ Thumbs.db
 
 # NiceGUI runtime storage
 .nicegui/
+
+# Certificats TLS locaux (clés privées, ne jamais committer)
+*.pem
+*.key
