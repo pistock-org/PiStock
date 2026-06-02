@@ -520,3 +520,18 @@ msgstr "Tous les statuts"
 
 msgid "No matching part."
 msgstr "Aucune pièce ne correspond."
+
+msgid "PiStock — Access"
+msgstr "PiStock — Accès"
+
+msgid "Enter the access password to use PiStock."
+msgstr "Saisissez le mot de passe d'accès pour utiliser PiStock."
+
+msgid "No access password set yet. Choose one to protect this instance."
+msgstr "Aucun mot de passe d'accès défini. Choisissez-en un pour protéger cette instance."
+
+msgid "Access password"
+msgstr "Mot de passe d'accès"
+
+msgid "Unlock"
+msgstr "Déverrouiller"

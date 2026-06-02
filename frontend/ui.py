@@ -44,6 +44,8 @@ import pages.dashboard  # noqa: F401  (registers "/")
 import pages.part       # noqa: F401  (registers "/part/{id}")
 import pages.plugins    # noqa: F401  (registers "/plugins")
 from pages.plugins import _load_plugins
+# NB: /login is a plain FastAPI route defined in main.py (the access
+# gate), not a NiceGUI page — nothing to import here.
 
 
 # ======================================================================
