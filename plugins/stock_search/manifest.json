@@ -1,0 +1,8 @@
+{
+  "id": "stock_search",
+  "name": "Stock search",
+  "version": "0.1.0",
+  "author": "GA3Dtech",
+  "description": "Search and manage stock: quantity, location, supply, datasheet, photo and CAD thumbnail. Filter by name fragment, location, and quantity range (0 .. infinity).",
+  "icon": "🔎"
+}
