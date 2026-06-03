@@ -12,6 +12,7 @@
 # ships its own translations, so it changes nothing in the base app.
 
 import os
+import json
 import datetime
 
 from sqlmodel import SQLModel, Field, Session, select
@@ -27,7 +28,10 @@ class WhiteboardPostit(SQLModel, table=True):
     title: str = Field(default="")
     note: str = Field(default="")
     hashtags: str = Field(default="")          # free text, e.g. "#idea #urgent"
-    image_path: str | None = Field(default=None)   # relative to DATA_DIR
+    # One or more relative image paths. Stored as a JSON list of strings
+    # (e.g. '["uploads/whiteboard/a.jpg", ...]'). For backward compat, a
+    # bare path string (legacy single-image notes) is still understood.
+    image_path: str | None = Field(default=None)
     created_at: str = Field(default="")
     updated_at: str = Field(default="")
 
@@ -41,6 +45,27 @@ def _now():
     return datetime.datetime.now().isoformat(timespec="seconds")
 
 
+def _parse_images(value):
+    """Read the image_path column into a list of relative paths.
+    Accepts a JSON list (new format) or a bare path (legacy single image)."""
+    if not value:
+        return []
+    value = value.strip()
+    if value.startswith("["):
+        try:
+            return [str(p) for p in json.loads(value) if p]
+        except Exception:
+            return []
+    return [value]
+
+
+def _serialize_images(paths):
+    """Pack a list of relative paths into the image_path column (JSON, or
+    None when empty)."""
+    paths = [p for p in (paths or []) if p]
+    return json.dumps(paths) if paths else None
+
+
 # ----------------------------------------------------------------------
 #  Translations (en/fr/de), self-contained
 # ----------------------------------------------------------------------
@@ -52,8 +77,8 @@ T = {
         "no_match": "No note matches the search.",
         "note_title": "Title", "note_body": "Note",
         "hashtags": "Hashtags (e.g. #idea #urgent)",
-        "image": "Image", "add_image": "Add / replace image",
-        "remove_image": "Remove image",
+        "image": "Image", "add_image": "Add image(s)",
+        "remove_image": "Remove",
         "save": "Save", "cancel": "Cancel", "delete": "Delete", "edit": "Edit",
         "confirm_delete": "Delete this note?",
         "default_board": "General",
@@ -65,8 +90,8 @@ T = {
         "no_match": "Aucune note ne correspond à la recherche.",
         "note_title": "Titre", "note_body": "Note",
         "hashtags": "Hashtags (ex. #idee #urgent)",
-        "image": "Image", "add_image": "Ajouter / remplacer l'image",
-        "remove_image": "Retirer l'image",
+        "image": "Image", "add_image": "Ajouter une / des image(s)",
+        "remove_image": "Retirer",
         "save": "Enregistrer", "cancel": "Annuler", "delete": "Supprimer", "edit": "Éditer",
         "confirm_delete": "Supprimer cette note ?",
         "default_board": "Général",
@@ -78,8 +103,8 @@ T = {
         "no_match": "Keine Notiz passt zur Suche.",
         "note_title": "Titel", "note_body": "Notiz",
         "hashtags": "Hashtags (z.B. #idee #dringend)",
-        "image": "Bild", "add_image": "Bild hinzufügen / ersetzen",
-        "remove_image": "Bild entfernen",
+        "image": "Bild", "add_image": "Bild(er) hinzufügen",
+        "remove_image": "Entfernen",
         "save": "Speichern", "cancel": "Abbrechen", "delete": "Löschen", "edit": "Bearbeiten",
         "confirm_delete": "Diese Notiz löschen?",
         "default_board": "Allgemein",
@@ -126,11 +151,12 @@ def _fetch(board, query=""):
                 if term not in hay:
                     continue
             out.append({"id": r.id, "title": r.title, "note": r.note,
-                        "hashtags": r.hashtags, "image_path": r.image_path})
+                        "hashtags": r.hashtags,
+                        "images": _parse_images(r.image_path)})
         return out
 
 
-def _save(board, title, note, hashtags, image_path, note_id=None):
+def _save(board, title, note, hashtags, images, note_id=None):
     import main
     with Session(main.engine) as s:
         if note_id is not None:
@@ -144,7 +170,7 @@ def _save(board, title, note, hashtags, image_path, note_id=None):
         row.title = (title or "").strip()
         row.note = (note or "").strip()
         row.hashtags = (hashtags or "").strip()
-        row.image_path = image_path
+        row.image_path = _serialize_images(images)
         row.updated_at = _now()
         s.commit()
 
@@ -254,11 +280,19 @@ def register(app):
                         ui.button(icon="delete",
                                   on_click=lambda nn=n: _confirm_delete(nn)) \
                             .props("flat round dense size=sm color=negative")
-                    if n["image_path"]:
-                        ui.image("/" + n["image_path"]) \
+                    imgs = n["images"]
+                    if len(imgs) == 1:
+                        ui.image("/" + imgs[0]) \
                             .classes("w-full rounded max-h-48 object-contain "
                                      "bg-white cursor-pointer") \
-                            .on("click", lambda p=n["image_path"]: _open_image(p))
+                            .on("click", lambda p=imgs[0]: _open_image(p))
+                    elif imgs:
+                        with ui.row().classes("w-full gap-1 flex-wrap"):
+                            for p in imgs:
+                                ui.image("/" + p) \
+                                    .classes("w-[72px] h-[72px] object-cover rounded "
+                                             "bg-white cursor-pointer") \
+                                    .on("click", lambda pp=p: _open_image(pp))
                     if n["note"]:
                         ui.label(n["note"]) \
                             .classes("text-sm whitespace-pre-wrap break-words")
@@ -292,7 +326,7 @@ def register(app):
                 dlg.open()
 
             def _open_editor(existing=None):
-                pending = {"image": existing["image_path"] if existing else None}
+                pending = {"images": list(existing["images"]) if existing else []}
                 with ui.dialog() as dlg, ui.card().classes("min-w-[420px] gap-2"):
                     ui.label(_tr("edit") if existing else _tr("new_note")) \
                         .classes("text-lg font-medium")
@@ -306,28 +340,33 @@ def register(app):
                                        value=existing["hashtags"] if existing else "") \
                         .classes("w-full")
 
-                    img_box = ui.row().classes("items-center gap-2")
+                    img_box = ui.row().classes("items-start gap-2 flex-wrap")
 
                     def render_img():
                         img_box.clear()
                         with img_box:
-                            if pending["image"]:
-                                ui.image("/" + pending["image"]) \
-                                    .classes("w-24 h-24 object-cover rounded bg-white")
+                            for p in pending["images"]:
+                                with ui.column().classes("items-center gap-0"):
+                                    ui.image("/" + p).classes(
+                                        "w-24 h-24 object-cover rounded bg-white")
 
-                                def remove():
-                                    pending["image"] = None
-                                    render_img()
-                                ui.button(_tr("remove_image"), on_click=remove) \
-                                    .props("flat dense color=negative")
+                                    def remove(pp=p):
+                                        pending["images"] = [
+                                            x for x in pending["images"] if x != pp]
+                                        render_img()
+                                    ui.button(_tr("remove_image"), on_click=remove) \
+                                        .props("flat dense size=sm color=negative")
                     render_img()
 
-                    def on_upload(e):
-                        data = e.content.read()
-                        pending["image"] = _save_image(e.name, data)
+                    async def on_upload(e):
+                        # NiceGUI >= 3.x: the event carries a single FileUpload
+                        # in e.file, and read() is async. With `multiple`, this
+                        # fires once per selected file.
+                        data = await e.file.read()
+                        pending["images"].append(_save_image(e.file.name, data))
                         render_img()
                     ui.upload(label=_tr("add_image"), auto_upload=True,
-                              max_files=1, on_upload=on_upload) \
+                              multiple=True, on_upload=on_upload) \
                         .props('accept="image/*"').classes("w-full")
 
                     with ui.row().classes("w-full justify-end gap-2 mt-2"):
@@ -336,7 +375,7 @@ def register(app):
                         def save():
                             _save(board_sel.value or state["board"],
                                   title_in.value, note_in.value, tags_in.value,
-                                  pending["image"],
+                                  pending["images"],
                                   note_id=existing["id"] if existing else None)
                             dlg.close()
                             # a brand-new board may now exist
