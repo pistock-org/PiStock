@@ -109,6 +109,17 @@ else
   ok "self-signed certificate generated"
 fi
 
+# --- 5b. Pre-configure the FreeCAD workbench (drop-in on a USB stick) -
+say "5b/7 Pre-configuring the FreeCAD workbench"
+WB_PKG="$REPO_DIR/backend/CAD-extensions/pistock-freecad/freecad/pistock_workbench"
+if [ -d "$WB_PKG" ]; then
+  cp -f cert.pem "$WB_PKG/pistock_ca.pem"
+  printf '%s:%s\n' "$PI_IP" "$PISTOCK_PORT" > "$WB_PKG/pistock_host.txt"
+  ok "workbench ready (host=$PI_IP:$PISTOCK_PORT, CA bundled)"
+else
+  warn "workbench folder not found ($WB_PKG) — skipped"
+fi
+
 # --- 6. systemd service (autostart) ----------------------------------
 say "6/7 systemd service (autostart on boot)"
 sudo tee /etc/systemd/system/pistock.service > /dev/null <<EOF
@@ -158,14 +169,19 @@ cat <<EOF
     separately the first time you do a destructive action.
 
   ----------------------------------------------------------------
-  📐 FreeCAD macros — point them to this server:
-       On each FreeCAD workstation, copy
-         backend/CAD-extensions/freecad/pistock_host.txt.example
-       to  pistock_host.txt  and put this single line in it:
+  📐 FreeCAD workbench — ready to copy (already configured for
+     ${PI_IP}:${PISTOCK_PORT}, certificate bundled):
 
-           ${PI_IP}
+       1. copy the folder
+            backend/CAD-extensions/pistock-freecad
+          onto a USB stick;
+       2. on each FreeCAD workstation, drop it into the Mod folder
+          and rename it "PiStock", e.g.:
+            Windows: %APPDATA%\\FreeCAD\\Mod\\PiStock
+            Linux:   ~/.local/share/FreeCAD/Mod/PiStock
+       3. restart FreeCAD → a "PiStock" workbench appears.
 
-       (the macros will use ${URL})
+     (No manual macro/host/certificate setup needed.)
   ----------------------------------------------------------------
 
   Manage the service:

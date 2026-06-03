@@ -70,49 +70,35 @@ PiStock has **two independent passwords**:
 
 ---
 
-## 4. Point the FreeCAD macros at the server
+## 4. Install the FreeCAD workbench on the workstations
 
-The macros run on the **designer's FreeCAD workstation**, not on the Pi.
-On each workstation:
+The FreeCAD side is a **workbench** (toolbar + menu) — no macro wiring by
+hand. The installer **pre-configures** it for your server (writes
+`pistock_host.txt` with the detected IP/port and bundles the TLS
+certificate as `pistock_ca.pem`), so deployment is copy-and-go:
 
-```bash
-cd backend/CAD-extensions/freecad
-cp pistock_host.txt.example pistock_host.txt
-```
+1. Copy the folder `backend/CAD-extensions/pistock-freecad` onto a USB
+   stick (it already contains the server address + certificate).
+2. On each FreeCAD workstation, drop it into FreeCAD's `Mod` directory
+   and rename it `PiStock`:
+   - Windows: `%APPDATA%\FreeCAD\Mod\PiStock`
+   - Linux: `~/.local/share/FreeCAD/Mod/PiStock`
+   - macOS: `~/Library/Application Support/FreeCAD/Mod/PiStock`
+3. Restart FreeCAD → a **PiStock** workbench appears, with three
+   commands: *Export part*, *Browse catalog*, *BOM from assembly*.
 
-Edit `pistock_host.txt` and put a single line with the Pi's IP (the one
-the installer printed):
+### Notes
 
-```
-192.168.1.50
-```
-
-The macros will then talk to `https://192.168.1.50:8000`. Accepted
-forms: `192.168.1.50`, `192.168.1.50:8000`, `pistock.local`, or a full
-`https://host:port`.
-
-### Trusting the self-signed certificate (important)
-
-The macros verify the server's TLS certificate **strictly** (this avoids
-false positives from antivirus software that flags "upload + disabled
-TLS verification" as data exfiltration). With a self-signed LAN
-certificate you must therefore tell the macros to trust it — copy the
-server's certificate to the macro folder under the name `pistock_ca.pem`:
-
-```bash
-# from the FreeCAD workstation, fetch the server's cert (= its own CA)
-scp pi@192.168.1.50:~/pistock/cert.pem \
-    backend/CAD-extensions/freecad/pistock_ca.pem
-```
-
-(Or set the `PISTOCK_CA` environment variable to the PEM's path.)
-
-Two things must match for verification to succeed:
-- the host in `pistock_host.txt` must be the **same** IP/name the
-  certificate was generated for (the installer uses the detected LAN IP
-  and `pistock.local`);
-- with a **real** certificate (e.g. Let's Encrypt on a proper domain),
-  nothing is needed — the system trust store already covers it.
+- The workbench reads two files next to its code: `pistock_host.txt`
+  (server address, e.g. `192.168.1.50:8000`) and `pistock_ca.pem` (the
+  server's TLS certificate). The installer fills both; you can also edit
+  them by hand (copy `pistock_host.txt.example`).
+- TLS verification is **strict** (this avoids antivirus false positives
+  that flag "upload + disabled verification" as data exfiltration). The
+  host in `pistock_host.txt` must match the IP/name the certificate was
+  generated for (the installer uses the detected LAN IP, `pistock.local`,
+  and `127.0.0.1`). With a **real** certificate (e.g. Let's Encrypt),
+  `pistock_ca.pem` is not needed — the system trust store covers it.
 
 ---
 

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
+  <name>PiStock</name>
+  <description>
+    PLM / inventory workbench for FreeCAD-based workshops: export parts
+    (CAD + thumbnail + 3D) to a PiStock server, browse and open the
+    catalog, and build BOMs from assemblies.
+  </description>
+  <version>0.1.0</version>
+  <date>2026-06-03</date>
+  <maintainer email="noreply@ga3dtech.invalid">GA3Dtech</maintainer>
+  <license file="../../../LICENSE">AGPL-3.0-or-later</license>
+  <url type="repository">https://github.com/GA3Dtech/PiStock</url>
+  <icon>freecad/pistock_workbench/resources/icons/pistock_explorer.svg</icon>
+  <content>
+    <workbench>
+      <classname>PiStockWorkbench</classname>
+      <name>PiStock</name>
+      <icon>freecad/pistock_workbench/resources/icons/pistock_explorer.svg</icon>
+      <description>Export parts, browse the catalog, build BOMs.</description>
+    </workbench>
+  </content>
+</package>

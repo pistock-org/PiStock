@@ -78,4 +78,6 @@ Thumbs.db
 
 # Config locale par machine (les templates .example sont versionnes)
 /pistock.conf
-backend/CAD-extensions/freecad/pistock_host.txt
+# Workbench FreeCAD : host + CA injectes au deploiement (par machine)
+backend/CAD-extensions/pistock-freecad/freecad/pistock_workbench/pistock_host.txt
+backend/CAD-extensions/pistock-freecad/freecad/pistock_workbench/pistock_ca.pem
