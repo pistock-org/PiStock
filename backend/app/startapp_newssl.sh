@@ -20,12 +20,14 @@ PISTOCK_DNS="${PISTOCK_DNS:-pistock.local}"
 
 cd "$PISTOCK_DIR"
 
-# 1. Generer un certificat valide pour l'IP/host configures
+# 1. Generer un certificat valide pour l'IP/host configures.
+#    On inclut aussi 127.0.0.1 / localhost dans le SAN pour que les tests
+#    en local (sur la machine du serveur) passent la verification stricte.
 openssl req -x509 -newkey rsa:4096 \
   -keyout key.pem -out cert.pem \
   -days 365 -nodes \
   -subj "/CN=${PISTOCK_IP}" \
-  -addext "subjectAltName=IP:${PISTOCK_IP},DNS:${PISTOCK_DNS}"
+  -addext "subjectAltName=IP:${PISTOCK_IP},DNS:${PISTOCK_DNS},IP:127.0.0.1,DNS:localhost"
 
 # 2. Lancer uvicorn en HTTPS
 cd backend/app

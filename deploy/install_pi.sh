@@ -99,10 +99,12 @@ say "5/7 TLS certificate"
 if [ -f key.pem ] && [ -f cert.pem ]; then
   warn "key.pem/cert.pem already present — kept"
 else
+  # SAN also covers 127.0.0.1 / localhost so local tests on the server
+  # itself pass strict certificate verification.
   openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem \
     -days 825 -nodes \
     -subj "/CN=${PI_IP}" \
-    -addext "subjectAltName=IP:${PI_IP},DNS:${PISTOCK_DNS}"
+    -addext "subjectAltName=IP:${PI_IP},DNS:${PISTOCK_DNS},IP:127.0.0.1,DNS:localhost"
   chmod 600 key.pem
   ok "self-signed certificate generated"
 fi

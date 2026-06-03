@@ -29,14 +29,10 @@ from PySide6 import QtWidgets, QtCore
 import ssl
 
 # Configuration : hote du serveur PiStock
-# IMPORTANT : on parle en HTTPS car le serveur est servi via TLS
-# (certificat auto-signe pour le LAN, Let's Encrypt en prod). Le
-# contexte SSL ci-dessous ignore la verification du certificat, ce
-# qui est ACCEPTABLE en local (127.0.0.1) car il n'y a pas de risque
-# de man-in-the-middle sur sa propre machine, et le cert auto-signe
-# n'est pas verifiable sans configuration explicite.
-# Pour de la prod sur un vrai domaine, remplacer par
-# ssl.create_default_context() (verification stricte).
+# On parle en HTTPS (TLS). La verification du certificat est TOUJOURS
+# active (voir build_ssl_context plus bas) : magasin de confiance
+# systeme par defaut, et pour un serveur LAN a certificat auto-signe,
+# on fait confiance proprement a son CA via pistock_ca.pem / PISTOCK_CA.
 # ----------------------------------------------------------------------
 #  Adresse du serveur PiStock : lue depuis pistock_host.txt
 # ----------------------------------------------------------------------
@@ -88,8 +84,27 @@ API_LIST = f"{API_BASE}/parts"            # GET  : liste des pièces
 API_PROJECTS = f"{API_BASE}/projects"     # GET  : liste des projets
 API_UPLOAD = f"{API_BASE}/parts/upload"   # POST : envoi d'un export
 
-# Contexte SSL permissif (cert auto-signe local)
-SSL_CONTEXT = ssl._create_unverified_context()
+def build_ssl_context():
+    """TLS context used for ALL requests to the PiStock server.
+
+    Certificate verification is ALWAYS on (there is no insecure mode):
+      - by default, the system trust store (strict verification) — all
+        you need with a real certificate (e.g. Let's Encrypt) in prod;
+      - to trust a LAN server using a SELF-SIGNED certificate, drop the
+        server's PEM next to this macro as 'pistock_ca.pem', or set the
+        PISTOCK_CA environment variable to its path. It is then trusted
+        cleanly via load_verify_locations().
+    """
+    context = ssl.create_default_context()
+    ca_file = os.environ.get("PISTOCK_CA") or os.path.join(
+        _macro_dir(), "pistock_ca.pem")
+    if ca_file and os.path.isfile(ca_file):
+        context.load_verify_locations(cafile=ca_file)
+    return context
+
+
+# TLS context used by every urlopen() below (see build_ssl_context).
+SSL_CONTEXT = build_ssl_context()
 
 # Emplacement où FreeCAD mémorise le dernier auteur saisi.
 # 'App.ParamGet' stocke ça de façon persistante dans la config

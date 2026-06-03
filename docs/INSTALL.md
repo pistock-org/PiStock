@@ -91,6 +91,29 @@ The macros will then talk to `https://192.168.1.50:8000`. Accepted
 forms: `192.168.1.50`, `192.168.1.50:8000`, `pistock.local`, or a full
 `https://host:port`.
 
+### Trusting the self-signed certificate (important)
+
+The macros verify the server's TLS certificate **strictly** (this avoids
+false positives from antivirus software that flags "upload + disabled
+TLS verification" as data exfiltration). With a self-signed LAN
+certificate you must therefore tell the macros to trust it — copy the
+server's certificate to the macro folder under the name `pistock_ca.pem`:
+
+```bash
+# from the FreeCAD workstation, fetch the server's cert (= its own CA)
+scp pi@192.168.1.50:~/pistock/cert.pem \
+    backend/CAD-extensions/freecad/pistock_ca.pem
+```
+
+(Or set the `PISTOCK_CA` environment variable to the PEM's path.)
+
+Two things must match for verification to succeed:
+- the host in `pistock_host.txt` must be the **same** IP/name the
+  certificate was generated for (the installer uses the detected LAN IP
+  and `pistock.local`);
+- with a **real** certificate (e.g. Let's Encrypt on a proper domain),
+  nothing is needed — the system trust store already covers it.
+
 ---
 
 ## 5. Managing the service
