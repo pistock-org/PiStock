@@ -1,0 +1,37 @@
+# PiStock — Wrap bodies into a Part container
+# Copyright (C) 2026 GA3Dtech — AGPLv3
+#
+# Convenience modelling helper (no network): wrap every PartDesign::Body
+# of the active document into a single App::Part container, named after
+# the document file (or its label). Handy to prepare a multi-body file
+# before exporting it to PiStock.
+
+import FreeCAD as App
+import os
+
+doc = App.ActiveDocument
+
+if doc is None:
+    App.Console.PrintError("Aucun document actif.\n")
+else:
+    # Nom du fichier (sans chemin ni extension), sinon le label du document
+    if doc.FileName:
+        nom = os.path.splitext(os.path.basename(doc.FileName))[0]
+    else:
+        nom = doc.Label
+
+    # Recupere tous les corps presents AVANT de creer le conteneur
+    corps = [o for o in doc.Objects if o.TypeId == "PartDesign::Body"]
+
+    # Cree le conteneur Part et le nomme d'apres le fichier
+    part = doc.addObject("App::Part", "Part")
+    part.Label = nom
+
+    # Insere tous les corps dans le conteneur
+    for c in corps:
+        part.addObject(c)
+
+    doc.recompute()
+    App.Console.PrintMessage(
+        "Conteneur '{}' cree avec {} corps.\n".format(nom, len(corps))
+    )

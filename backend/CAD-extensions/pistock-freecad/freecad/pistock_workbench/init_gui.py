@@ -66,8 +66,14 @@ Gui.addCommand("PiStock_Explorer", _PiStockCommand(
 Gui.addCommand("PiStock_BomFromAssembly", _PiStockCommand(
     "pistock_bom_from_assembly.FCMacro", "pistock_bom_from_assembly.svg",
     "BOM from assembly", "Create a PiStock BOM from the active assembly"))
+Gui.addCommand("PiStock_WrapBodies", _PiStockCommand(
+    "pistock_wrap_bodies.FCMacro", "pistock_wrap_bodies.svg",
+    "Wrap bodies into a Part",
+    "Wrap every PartDesign Body of the active document into an App::Part "
+    "named after the file"))
 
-_COMMANDS = ["PiStock_Export", "PiStock_Explorer", "PiStock_BomFromAssembly"]
+_COMMANDS = ["PiStock_WrapBodies", "PiStock_Export",
+             "PiStock_Explorer", "PiStock_BomFromAssembly"]
 
 
 class PiStockWorkbench(Gui.Workbench):
