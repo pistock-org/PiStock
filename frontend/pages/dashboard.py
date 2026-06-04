@@ -127,7 +127,118 @@ def dashboard_page():
                 const partId = trigger.dataset.pistockCapture;
                 pistockCapturePhoto(parseInt(partId, 10));
             });
+
+            // ---- Listener pour ZOOM IMAGE (lightbox) ----
+            // Cible : tout <img data-pistock-zoom> (photo de stock...).
+            // Au clic : ouvre une visionneuse plein ecran zoomable.
+            document.addEventListener('click', function(e) {
+                const img = e.target.closest('img[data-pistock-zoom]');
+                if (!img) return;
+                e.preventDefault();
+                window.pistockOpenImage(img.getAttribute('src'));
+            });
         }
+
+        // ===================================================
+        //  VISIONNEUSE D'IMAGE ZOOMABLE (lightbox)
+        // ===================================================
+        // Overlay plein ecran : zoom molette + boutons +/-/ajuster,
+        // glisser pour se deplacer quand c'est zoome, Echap/clic fond
+        // pour fermer. Pur DOM, aucune dependance.
+        window.pistockOpenImage = function(src) {
+            if (!src) return;
+            let k = 1, tx = 0, ty = 0;          // echelle + translation
+            let dragging = false, sx = 0, sy = 0;
+
+            const overlay = document.createElement('div');
+            overlay.style.cssText =
+                'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.92);' +
+                'display:flex;flex-direction:column;';
+
+            const bar = document.createElement('div');
+            bar.style.cssText =
+                'display:flex;align-items:center;gap:4px;padding:8px;' +
+                'background:#292524;color:#fff;flex:0 0 auto;';
+            const mkBtn = (label, title) => {
+                const b = document.createElement('button');
+                b.textContent = label; b.title = title || '';
+                b.style.cssText =
+                    'font-size:20px;line-height:1;width:40px;height:40px;' +
+                    'border:none;border-radius:8px;background:transparent;' +
+                    'color:#fff;cursor:pointer;';
+                b.onmouseenter = () => b.style.background = 'rgba(255,255,255,.15)';
+                b.onmouseleave = () => b.style.background = 'transparent';
+                return b;
+            };
+            const bOut = mkBtn('−', 'Zoom -');
+            const pct = document.createElement('span');
+            pct.style.cssText = 'width:56px;text-align:center;font-size:14px;';
+            const bIn  = mkBtn('+', 'Zoom +');
+            const bFit = mkBtn('⤢', 'Ajuster');
+            const spacer = document.createElement('div'); spacer.style.flex = '1';
+            const bClose = mkBtn('✕', 'Fermer');
+            bar.append(bOut, pct, bIn, bFit, spacer, bClose);
+
+            const stage = document.createElement('div');
+            stage.style.cssText =
+                'flex:1 1 auto;overflow:hidden;display:flex;align-items:center;' +
+                'justify-content:center;cursor:grab;';
+
+            const img = document.createElement('img');
+            img.src = src;
+            img.style.cssText =
+                'max-width:95vw;max-height:100%;user-select:none;' +
+                '-webkit-user-drag:none;transition:transform .05s linear;';
+
+            stage.appendChild(img);
+            overlay.append(bar, stage);
+            document.body.appendChild(overlay);
+
+            function apply() {
+                k = Math.max(0.25, Math.min(k, 12));
+                if (k <= 1) { tx = 0; ty = 0; }   // recentre une fois ajuste
+                img.style.transform =
+                    'translate(' + tx + 'px,' + ty + 'px) scale(' + k + ')';
+                pct.textContent = Math.round(k * 100) + '%';
+                stage.style.cursor = k > 1 ? 'grab' : 'default';
+            }
+            const zoomAt = (factor) => { k *= factor; apply(); };
+
+            bOut.onclick   = () => { k -= 0.25; apply(); };
+            bIn.onclick    = () => { k += 0.25; apply(); };
+            bFit.onclick   = () => { k = 1; tx = 0; ty = 0; apply(); };
+            function close() {
+                document.removeEventListener('keydown', onKey);
+                overlay.remove();
+            }
+            bClose.onclick = close;
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay || e.target === stage) close();
+            });
+            function onKey(e) { if (e.key === 'Escape') close(); }
+            document.addEventListener('keydown', onKey);
+
+            stage.addEventListener('wheel', function(e) {
+                e.preventDefault();
+                zoomAt(e.deltaY > 0 ? 0.9 : 1.1);
+            }, { passive: false });
+
+            stage.addEventListener('mousedown', function(e) {
+                if (k <= 1) return;
+                dragging = true; sx = e.clientX - tx; sy = e.clientY - ty;
+                stage.style.cursor = 'grabbing'; e.preventDefault();
+            });
+            window.addEventListener('mousemove', function(e) {
+                if (!dragging) return;
+                tx = e.clientX - sx; ty = e.clientY - sy; apply();
+            });
+            window.addEventListener('mouseup', function() {
+                if (!dragging) return;
+                dragging = false; stage.style.cursor = 'grab';
+            });
+
+            apply();
+        };
 
         // ===================================================
         //  FONCTION DE CAPTURE PHOTO VIA getUserMedia
@@ -780,7 +891,9 @@ def render_stock_photo_cell(part: dict, on_change):
                 <div class="w-20 h-20 bg-stone-100 rounded-lg flex items-center justify-center overflow-hidden">
                     <img src="{part["stock_img_url"]}"
                          alt="{_("Stock photo")}"
-                         class="w-full h-full object-contain">
+                         data-pistock-zoom
+                         title="{_("Click to enlarge")}"
+                         class="w-full h-full object-contain cursor-zoom-in">
                 </div>
                 <div class="flex gap-2 text-xs">
                     <label class="text-blue-600 cursor-pointer hover:underline">
