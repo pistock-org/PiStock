@@ -29,6 +29,10 @@ openssl req -x509 -newkey rsa:4096 \
   -subj "/CN=${PISTOCK_IP}" \
   -addext "subjectAltName=IP:${PISTOCK_IP},DNS:${PISTOCK_DNS},IP:127.0.0.1,DNS:localhost"
 
+# 1b. Rafraichir le certificat/adresse embarques dans le workbench FreeCAD
+#     pour qu'ils correspondent au cert qu'on vient de generer. Non bloquant.
+bash "$PISTOCK_DIR/deploy/sync_workbench_cert.sh" "$PISTOCK_DIR" || true
+
 # 2. Lancer uvicorn en HTTPS
 cd backend/app
 uvicorn main:app --host 0.0.0.0 --port "$PISTOCK_PORT" \

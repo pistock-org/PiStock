@@ -110,15 +110,11 @@ else
 fi
 
 # --- 5b. Pre-configure the FreeCAD workbench (drop-in on a USB stick) -
+# Delegates to the shared sync helper so the cert/host injection is done
+# in exactly ONE place (also used by startapp.sh / startapp_newssl.sh).
 say "5b/7 Pre-configuring the FreeCAD workbench"
-WB_PKG="$REPO_DIR/backend/CAD-extensions/pistock-freecad/freecad/pistock_workbench"
-if [ -d "$WB_PKG" ]; then
-  cp -f cert.pem "$WB_PKG/pistock_ca.pem"
-  printf '%s:%s\n' "$PI_IP" "$PISTOCK_PORT" > "$WB_PKG/pistock_host.txt"
-  ok "workbench ready (host=$PI_IP:$PISTOCK_PORT, CA bundled)"
-else
-  warn "workbench folder not found ($WB_PKG) — skipped"
-fi
+bash "$REPO_DIR/deploy/sync_workbench_cert.sh" "$REPO_DIR" \
+  || warn "workbench cert/host sync skipped"
 
 # --- 6. systemd service (autostart) ----------------------------------
 say "6/7 systemd service (autostart on boot)"

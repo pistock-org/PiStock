@@ -18,6 +18,12 @@ PISTOCK_PORT="${PISTOCK_PORT:-8000}"
 
 # --- Lancer uvicorn en HTTPS ------------------------------------------
 cd "$PISTOCK_DIR"
+
+# Garder le certificat embarque dans le workbench FreeCAD synchronise
+# avec celui qu'on sert, pour que la copie USB fasse toujours confiance
+# a CE serveur. Non bloquant.
+bash "$PISTOCK_DIR/deploy/sync_workbench_cert.sh" "$PISTOCK_DIR" || true
+
 cd backend/app
 uvicorn main:app --host 0.0.0.0 --port "$PISTOCK_PORT" \
   --ssl-keyfile ../../key.pem \
