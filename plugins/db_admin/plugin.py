@@ -71,6 +71,12 @@ T = {
         "dest_folder": "Target folder (server-side path)",
         "source_folder": "Source folder (a data-pistock export)",
         "run_export": "Export now", "run_import": "Import…", "run_merge": "Merge…",
+        "wb_title": "FreeCAD workbench",
+        "wb_hint": "Copy the ready-to-use PiStock workbench (already carrying this server's address and certificate) into the target folder, as a 'PiStock' folder. Then drop that folder into FreeCAD's Mod directory on the workstation.",
+        "run_wb": "Copy workbench",
+        "wb_no_src": "Workbench source folder not found in the repo.",
+        "wb_done": "Workbench copied to: {path}. Drop the 'PiStock' folder into FreeCAD's Mod directory, then restart FreeCAD.",
+        "wb_warn": "⚠ {files} missing — set the server address first (deployment or dev_set_location.sh).",
         "no_dest": "Target folder does not exist.",
         "no_source": "Source folder has no {db}.".format(db=DB_NAME),
         "incompatible": "Incompatible database — operation cancelled.",
@@ -111,6 +117,12 @@ T = {
         "dest_folder": "Dossier cible (chemin côté serveur)",
         "source_folder": "Dossier source (un export data-pistock)",
         "run_export": "Exporter", "run_import": "Importer…", "run_merge": "Fusionner…",
+        "wb_title": "Workbench FreeCAD",
+        "wb_hint": "Copie le workbench PiStock prêt à l'emploi (déjà porteur de l'adresse et du certificat de ce serveur) dans le dossier cible, sous la forme d'un dossier « PiStock ». Déposez ensuite ce dossier dans le répertoire Mod de FreeCAD sur le poste.",
+        "run_wb": "Copier le workbench",
+        "wb_no_src": "Dossier source du workbench introuvable dans le dépôt.",
+        "wb_done": "Workbench copié vers : {path}. Déposez le dossier « PiStock » dans le répertoire Mod de FreeCAD, puis redémarrez FreeCAD.",
+        "wb_warn": "⚠ {files} manquant(s) — définissez d'abord l'adresse du serveur (déploiement ou dev_set_location.sh).",
         "no_dest": "Le dossier cible n'existe pas.",
         "no_source": "Le dossier source ne contient pas {db}.".format(db=DB_NAME),
         "incompatible": "Base incompatible — opération annulée.",
@@ -151,6 +163,12 @@ T = {
         "dest_folder": "Zielordner (serverseitiger Pfad)",
         "source_folder": "Quellordner (ein data-pistock-Export)",
         "run_export": "Exportieren", "run_import": "Importieren…", "run_merge": "Zusammenführen…",
+        "wb_title": "FreeCAD-Workbench",
+        "wb_hint": "Kopiert die einsatzbereite PiStock-Workbench (mit Adresse und Zertifikat dieses Servers) in den Zielordner als Ordner 'PiStock'. Diesen Ordner dann in das Mod-Verzeichnis von FreeCAD auf der Arbeitsstation legen.",
+        "run_wb": "Workbench kopieren",
+        "wb_no_src": "Workbench-Quellordner im Repo nicht gefunden.",
+        "wb_done": "Workbench kopiert nach: {path}. Den Ordner 'PiStock' in das Mod-Verzeichnis von FreeCAD legen und FreeCAD neu starten.",
+        "wb_warn": "⚠ {files} fehlt/fehlen — zuerst die Serveradresse setzen (Deployment oder dev_set_location.sh).",
         "no_dest": "Der Zielordner existiert nicht.",
         "no_source": "Der Quellordner enthält keine {db}.".format(db=DB_NAME),
         "incompatible": "Inkompatible Datenbank — Vorgang abgebrochen.",
@@ -295,6 +313,40 @@ def export_data(data_dir, dest_root):
     dest = os.path.join(dest_root, f"pistock-export-{_stamp()}")
     shutil.copytree(data_dir, dest)
     return True, _tr("exported", path=dest)
+
+
+def _workbench_dir():
+    """Absolute path to the FreeCAD workbench shipped in the repo (the
+    folder dropped into FreeCAD's Mod directory). Resolved from this
+    plugin file: plugins/db_admin/plugin.py -> repo root."""
+    root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+    return os.path.join(root, "backend", "CAD-extensions", "pistock-freecad")
+
+
+def export_workbench(dest_root):
+    """Copy the ready-to-use FreeCAD workbench into dest_root/PiStock, so
+    it can be dropped straight into FreeCAD's Mod directory on a
+    workstation. The repo copy already carries this server's address
+    (pistock_host.txt) and certificate (pistock_ca.pem), injected at
+    deployment. Returns (ok, msg)."""
+    if not dest_root or not os.path.isdir(dest_root):
+        return False, _tr("no_dest")
+    src = _workbench_dir()
+    if not os.path.isdir(src):
+        return False, _tr("wb_no_src")
+    dest = os.path.join(dest_root, "PiStock")
+    shutil.copytree(src, dest, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    # Non-blocking warning if the server address / certificate are absent
+    # (e.g. workbench never configured by deploy/dev_set_location.sh).
+    wb = os.path.join(src, "freecad", "pistock_workbench")
+    missing = [f for f in ("pistock_host.txt", "pistock_ca.pem")
+               if not os.path.isfile(os.path.join(wb, f))]
+    msg = _tr("wb_done", path=dest)
+    if missing:
+        msg += " " + _tr("wb_warn", files=", ".join(missing))
+    return True, msg
 
 
 def import_data(data_dir, source_dir):
@@ -750,6 +802,27 @@ def register(app):
                     dlg = _confirm_dialog(_tr("confirm_merge_t"),
                                           _tr("confirm_merge_b"), really)
                 ui.button(_tr("run_merge"), on_click=do_merge).props("color=primary")
+
+            # --- FREECAD WORKBENCH ---
+            with ui.card().classes("w-full p-4 gap-2"):
+                ui.label("🧩 " + _tr("wb_title")).classes("text-lg font-medium")
+                ui.label(_tr("wb_hint")).classes("text-sm text-gray-600")
+                with ui.row().classes("w-full items-end gap-2 no-wrap"):
+                    wdest = ui.input(_tr("dest_folder")).props("dense").classes("flex-grow")
+                    ui.button(icon="folder_open",
+                              on_click=lambda: _open_folder_picker(wdest)) \
+                        .props("flat dense").tooltip(_tr("browse"))
+                wres = ui.label("").classes("text-sm")
+
+                def do_wb():
+                    try:
+                        ok, msg = export_workbench((wdest.value or "").strip())
+                    except Exception as e:  # noqa: BLE001
+                        ok, msg = False, str(e)
+                    wres.text = msg
+                    wres.classes(replace="text-sm " + ("text-green-700" if ok else "text-red-600"))
+                    ui.notify(msg, type="positive" if ok else "negative")
+                ui.button(_tr("run_wb"), on_click=do_wb).props("color=primary")
 
     def _confirm_dialog(title, body, on_confirm):
         from nicegui import ui
