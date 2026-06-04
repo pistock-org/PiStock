@@ -449,11 +449,13 @@ def dashboard_page():
         with ui.row().classes("w-full items-center gap-2"):
             ui.label(_("Project:")).classes("text-sm text-gray-600")
             # The select is filled dynamically (may be empty if no
-            # project exists yet). Initialized empty here, populated
-            # by refresh_project_filter().
+            # project exists yet). It DEFAULTS to "(No project)" so the
+            # startup view stays light even when the catalog grows large;
+            # the user can still switch to "All projects" or one project.
+            # The full option list is populated by refresh_project_filter().
             project_filter = ui.select(
-                options={"": _("All projects")},
-                value="",
+                options={"": _("All projects"), UNASSIGNED: _("(No project)")},
+                value=UNASSIGNED,
                 on_change=lambda _: refresh_list()
             ).classes("min-w-[200px]")
 
