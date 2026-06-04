@@ -307,9 +307,43 @@ def register(app):
                                         lambda t=c: (search_in.set_value(t), render()))
 
             def _open_image(rel):
-                with ui.dialog() as dlg, ui.card().classes("p-1"):
-                    ui.image("/" + rel).classes("max-w-[90vw] max-h-[85vh]") \
-                        .on("click", dlg.close)
+                zoom = {"k": 1.0}
+                with ui.dialog().props("maximized") as dlg, \
+                        ui.card().classes("p-0 bg-black w-screen h-screen"):
+                    with ui.row().classes("w-full items-center gap-1 p-2 "
+                                          "bg-stone-800 text-white"):
+                        ui.button(icon="zoom_out",
+                                  on_click=lambda: _apply(zoom["k"] - 0.25)) \
+                            .props("flat round color=white")
+                        pct = ui.label("100%").classes("w-14 text-center")
+                        ui.button(icon="zoom_in",
+                                  on_click=lambda: _apply(zoom["k"] + 0.25)) \
+                            .props("flat round color=white")
+                        ui.button(icon="fit_screen",
+                                  on_click=lambda: _apply(1.0)) \
+                            .props("flat round color=white")
+                        ui.element("div").classes("flex-grow")
+                        ui.button(icon="close", on_click=dlg.close) \
+                            .props("flat round color=white")
+                    pan = ui.element("div").classes(
+                        "w-full overflow-auto flex items-center justify-center") \
+                        .style("height: calc(100vh - 64px)")
+                    with pan:
+                        img = ui.image("/" + rel).classes("max-w-none") \
+                            .style("transition: transform .05s linear;")
+
+                    def _apply(k):
+                        k = max(0.25, min(k, 8.0))
+                        zoom["k"] = k
+                        img.style(f"transform: scale({k}); "
+                                  "transform-origin: center center;")
+                        pct.set_text(f"{int(round(k * 100))}%")
+
+                    def _wheel(e):
+                        dy = (e.args or {}).get("deltaY", 0)
+                        _apply(zoom["k"] * (0.9 if dy > 0 else 1.1))
+                    pan.on("wheel.prevent", _wheel, ["deltaY"])
+                    _apply(1.0)
                 dlg.open()
 
             def _confirm_delete(n):
