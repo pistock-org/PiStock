@@ -535,3 +535,18 @@ msgstr "Zugangspasswort"
 
 msgid "Unlock"
 msgstr "Entsperren"
+
+msgid "PiStock — Projects"
+msgstr "PiStock — Projekte"
+
+msgid "Projects overview"
+msgstr "Projektübersicht"
+
+msgid "Open this project in the catalog"
+msgstr "Dieses Projekt im Katalog öffnen"
+
+msgid "No part in this project yet."
+msgstr "Noch kein Teil in diesem Projekt."
+
+msgid "No project yet. Create one from the catalog."
+msgstr "Noch kein Projekt. Erstellen Sie eines im Katalog."

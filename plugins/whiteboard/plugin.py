@@ -232,7 +232,7 @@ def register(app):
                           on_click=lambda: ui.navigate.to("/plugins")) \
                     .props("flat color=white").classes("text-sm")
                 ui.button("🏠 " + _tr("catalog"),
-                          on_click=lambda: ui.navigate.to("/")) \
+                          on_click=lambda: ui.navigate.to("/catalog")) \
                     .props("flat color=white").classes("text-sm")
 
         state = {"board": _boards()[0]}

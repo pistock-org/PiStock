@@ -106,7 +106,8 @@ frontend/
     header.py           # render_app_header (shared by every page)
     admin.py            # admin session state + login/setup/change dialogs + _ensure_admin
   pages/
-    dashboard.py        # "/"            catalog + part/project/BOM/stock dialogs
+    projects_overview.py # "/"           visual landing: 1 row/project, thumbnail strip
+    dashboard.py        # "/catalog"     catalog + part/project/BOM/stock dialogs
     part.py             # "/part/{id}"   3D viewer + PLM revisions
     plugins.py          # "/plugins"     plugin loader + index page
   locales/{en,fr,de}/LC_MESSAGES/messages.po
@@ -119,7 +120,8 @@ frontend/
 | `db.py` | 781 | DB access layer (no `ui` dependency) |
 | `components/header.py` | 110 | Common page header |
 | `components/admin.py` | 206 | Admin session + dialogs + `_ensure_admin` |
-| `pages/dashboard.py` | 1652 | Catalog page + most dialogs |
+| `pages/projects_overview.py` | 175 | Visual landing page: one row per project with a horizontally-scrollable thumbnail strip |
+| `pages/dashboard.py` | 1658 | Catalog page (`/catalog`) + most dialogs |
 | `pages/part.py` | 265 | Part detail / 3D viewer + revisions |
 | `pages/plugins.py` | 138 | Plugin loading + index page |
 

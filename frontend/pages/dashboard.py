@@ -35,9 +35,13 @@ from db import (UNASSIGNED, fetch_parts_full, fetch_last_used_project_id, assign
 # ======================================================================
 #  PAGE : DASHBOARD
 # ======================================================================
-@ui.page("/")
-def dashboard_page():
-    """Main page: list of parts as cards."""
+@ui.page("/catalog")
+def dashboard_page(project: str | None = None):
+    """Catalog page: list of parts as cards.
+
+    'project' is an optional query parameter (e.g. /catalog?project=AAB)
+    used to open the catalog already filtered on a given project — this
+    is how the projects overview ("/") links into the catalog."""
     # Apply the language chosen by the user BEFORE building anything
     # (the first calls to _() depend on it).
     _apply_user_lang()
@@ -439,8 +443,10 @@ def dashboard_page():
         </script>
     ''')
 
-    # Dark header, as in the HTML version
-    render_app_header("PiStock — Catalog")
+    # Dark header. The catalog is no longer the landing page (the
+    # projects overview is, at "/"), so we expose the 🏠 button to go
+    # back to it.
+    render_app_header("PiStock — Catalog", show_home=True)
 
     # Main centered container, max width
     with ui.column().classes("w-full max-w-5xl mx-auto p-4 gap-4"):
@@ -500,6 +506,13 @@ def dashboard_page():
             project_filter.update()
 
         refresh_project_filter()
+
+        # Honor the optional ?project=CODE query parameter: when the
+        # catalog is opened from the projects overview, it lands already
+        # filtered on that project. Ignored silently if the code is
+        # unknown (the default UNASSIGNED filter then applies).
+        if project and project in project_filter.options:
+            project_filter.value = project
 
         # List container, filled then re-filled by refresh_list()
         list_container = ui.column().classes("w-full gap-3")

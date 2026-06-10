@@ -357,7 +357,7 @@ def register(app):
                           on_click=lambda: ui.navigate.to("/plugins")) \
                     .props("flat color=white").classes("text-sm")
                 ui.button("🏠 " + _tr("catalog"),
-                          on_click=lambda: ui.navigate.to("/")) \
+                          on_click=lambda: ui.navigate.to("/catalog")) \
                     .props("flat color=white").classes("text-sm")
 
         with ui.column().classes("max-w-6xl mx-auto p-4 w-full gap-3"):

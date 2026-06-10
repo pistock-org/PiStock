@@ -22,7 +22,8 @@ This file is intentionally THIN. The UI has been split into:
   - components/header.py -> common header
   - components/admin.py  -> admin session + dialogs
   - db.py                -> database access layer
-  - pages/dashboard.py   -> catalog page "/"
+  - pages/projects_overview.py -> visual landing page "/"
+  - pages/dashboard.py   -> catalog page "/catalog"
   - pages/part.py        -> detail/viewer page "/part/{id}"
   - pages/plugins.py     -> plugin loading + page "/plugins"
 
@@ -32,7 +33,8 @@ same server. Database access goes directly through the SQLModel models
 (no internal HTTP) — see db.py.
 
 Pages:
-  /              -> catalog (list of parts)
+  /              -> projects overview (visual landing page)
+  /catalog       -> catalog (list of parts)
   /part/{id}     -> 3D viewer of a part
   /plugins       -> plugin index
 """
@@ -40,7 +42,8 @@ from nicegui import ui
 
 # Importing the page modules is enough to register their @ui.page with
 # NiceGUI. The order does not matter.
-import pages.dashboard  # noqa: F401  (registers "/")
+import pages.projects_overview  # noqa: F401  (registers "/")
+import pages.dashboard  # noqa: F401  (registers "/catalog")
 import pages.part       # noqa: F401  (registers "/part/{id}")
 import pages.plugins    # noqa: F401  (registers "/plugins")
 from pages.plugins import _load_plugins
