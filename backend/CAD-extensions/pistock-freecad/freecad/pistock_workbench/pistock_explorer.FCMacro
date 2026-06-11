@@ -18,6 +18,12 @@
 PiStock Explorer — onglet central FreeCAD pour parcourir les pièces
 de la base PiStock et les ouvrir d'un clic.
 
+Vue par projet : un bloc par projet (code + description), chacun avec
+une bande horizontale scrollable des vignettes de ses pièces — une
+carte visuelle d'ensemble des projets et de leur contenu, dans le même
+esprit que la page d'accueil web. Cliquer une carte télécharge le
+.FCStd et l'ouvre dans FreeCAD.
+
 Inspiré de la page d'accueil FreeCAD et du projet 4DOverview.
 """
 
@@ -109,7 +115,10 @@ def build_ssl_context():
 # TLS context used by every urlopen() below (see build_ssl_context).
 SSL_CONTEXT = build_ssl_context()
 
-# Disposition de la grille de thumbnails
+# Dimensions des cartes. En vue « tous les projets », les vignettes
+# sont alignées en bandes horizontales (une par projet) ; en vue d'un
+# projet précis, elles sont disposées en grille de GRID_COLUMNS colonnes
+# avec retour à la ligne.
 GRID_COLUMNS = 4
 CARD_WIDTH = 180
 CARD_HEIGHT = 230
@@ -162,6 +171,9 @@ TRANSLATIONS = {
         "No part matching this filter.\nUse the PiStock Exporter macro to publish from a document, or create a part manually via the web interface.":
             "Aucune pièce correspondant à ce filtre.\nUtilisez la macro PiStock Exporter pour publier depuis un document, ou créez une pièce manuellement via l'interface web.",
         "(no thumbnail)": "(pas de vignette)",
+        "(no description)": "(pas de description)",
+        "No part in this project yet.":
+            "Aucune pièce dans ce projet pour l'instant.",
         "locked": "verrouillée",
         "No FreeCAD file associated to this part.":
             "Aucun fichier FreeCAD associé à cette pièce.",
@@ -428,9 +440,11 @@ class PiStockExplorerWidget(QtWidgets.QWidget):
         self.scroll.setWidgetResizable(True)
         self.scroll.setStyleSheet("QScrollArea { border: none; }")
         self.grid_container = QtWidgets.QWidget()
-        self.grid_layout = QtWidgets.QGridLayout(self.grid_container)
-        self.grid_layout.setSpacing(12)
-        self.grid_layout.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
+        # Pile verticale de blocs-projets. Chaque bloc = en-tête (code +
+        # description) + bande horizontale scrollable des vignettes.
+        self.grid_layout = QtWidgets.QVBoxLayout(self.grid_container)
+        self.grid_layout.setSpacing(20)
+        self.grid_layout.setAlignment(QtCore.Qt.AlignTop)
         self.scroll.setWidget(self.grid_container)
         pistock_layout.addWidget(self.scroll, 1)  # stretch=1
 
@@ -556,50 +570,67 @@ class PiStockExplorerWidget(QtWidgets.QWidget):
         self._refresh_grid()
 
     def _refresh_grid(self):
-        """Vide et reconstruit la grille selon le filtre projet."""
-        # 1. Vide la grille existante
+        """Vide et reconstruit la zone pièces selon le filtre projet :
+
+          - « Tous les projets » : un bloc par projet, chacun avec une
+            bande horizontale scrollable de ses vignettes (vue d'accueil).
+          - un projet précis (ou « Sans projet ») : grille de vignettes
+            sur GRID_COLUMNS colonnes avec retour à la ligne.
+        """
+        # 1. Vide la vue existante
         while self.grid_layout.count() > 0:
             item = self.grid_layout.takeAt(0)
             w = item.widget()
             if w is not None:
                 w.deleteLater()
 
-        # 2. Filtre les pieces selon le projet selectionne
         filter_code = self.project_combo.currentData()
-        if filter_code == "":
-            filtered = list(self.parts)
-        elif filter_code == "__none__":
-            filtered = [p for p in self.parts
-                        if p.get("id_project") is None]
-        else:
-            filtered = [p for p in self.parts
-                        if p.get("project_code") == filter_code]
+        # 'cards' collecte TOUTES les cartes créées (quel que soit le
+        # mode) pour le téléchargement différé des vignettes en fin de
+        # méthode.
+        cards = []
 
-        # 3. Mise a jour du compteur en barre
-        if not filtered:
-            self.status_label.setText(tr("No part"))
-            empty = QtWidgets.QLabel(tr(
-                "No part matching this filter.\n"
-                "Use the PiStock Exporter macro to publish from a "
-                "document, or create a part manually via the web interface."))
-            empty.setAlignment(QtCore.Qt.AlignCenter)
-            empty.setStyleSheet("color: #6b7280; padding: 40px;")
-            self.grid_layout.addWidget(empty, 0, 0, 1, GRID_COLUMNS)
-            return
+        if not filter_code:
+            # ---- Vue « tous les projets » : bandes horizontales ----
+            # Un bloc par projet (projets seuls, comme la page d'accueil
+            # web). Les pièces sans projet restent accessibles via le
+            # filtre « (Sans projet) ».
+            parts_by_code = {}
+            for p in self.parts:
+                pc = p.get("project_code")
+                if pc:
+                    parts_by_code.setdefault(pc, []).append(p)
+            groups = [(proj, parts_by_code.get(proj.get("code"), []))
+                      for proj in self.projects]
+            if not groups:
+                self.status_label.setText(tr("No part"))
+                self._add_empty_message()
+                return
+            total = sum(len(parts) for _proj, parts in groups)
+            self.status_label.setText(tr("{n} part(s)").format(n=total))
+            for proj, parts in groups:
+                block = self._make_project_block(proj, parts, cards)
+                self.grid_layout.addWidget(block)
+            self.grid_layout.addStretch()
         else:
+            # ---- Vue d'un projet précis : grille avec retour ligne ----
+            if filter_code == "__none__":
+                filtered = [p for p in self.parts
+                            if p.get("id_project") is None]
+            else:
+                filtered = [p for p in self.parts
+                            if p.get("project_code") == filter_code]
+            if not filtered:
+                self.status_label.setText(tr("No part"))
+                self._add_empty_message()
+                return
             self.status_label.setText(
                 tr("{n} part(s)").format(n=len(filtered)))
+            grid_widget = self._make_parts_grid(filtered, cards)
+            self.grid_layout.addWidget(grid_widget)
+            self.grid_layout.addStretch()
 
-        # 4. Place les cartes dans la grille
-        cards = []
-        for idx, part in enumerate(filtered):
-            row = idx // GRID_COLUMNS
-            col = idx % GRID_COLUMNS
-            card = PartCard(part, self._open_part)
-            self.grid_layout.addWidget(card, row, col)
-            cards.append(card)
-
-        # 5. Telecharge les thumbnails en sequence apres l'affichage
+        # Telecharge les thumbnails en sequence apres l'affichage
         # initial. On utilise QApplication.processEvents() entre chaque
         # pour que Qt redessine — UX moins fluide qu'un vrai thread,
         # mais BEAUCOUP plus simple et largement suffisant pour des
@@ -619,6 +650,93 @@ class PiStockExplorerWidget(QtWidgets.QWidget):
                 App.Console.PrintWarning(
                     f"Thumbnail {thumb_url} : {e}\n")
             QtWidgets.QApplication.processEvents()
+
+    def _add_empty_message(self):
+        """Ajoute le message « aucune pièce » centré dans la zone."""
+        empty = QtWidgets.QLabel(tr(
+            "No part matching this filter.\n"
+            "Use the PiStock Exporter macro to publish from a "
+            "document, or create a part manually via the web interface."))
+        empty.setAlignment(QtCore.Qt.AlignCenter)
+        empty.setStyleSheet("color: #6b7280; padding: 40px;")
+        self.grid_layout.addWidget(empty)
+
+    def _make_parts_grid(self, parts, cards_out):
+        """Construit un widget grille (GRID_COLUMNS colonnes, retour à
+        la ligne) pour la vue d'un projet précis. Ajoute les PartCard
+        créées à 'cards_out' pour le téléchargement différé des
+        vignettes."""
+        container = QtWidgets.QWidget()
+        grid = QtWidgets.QGridLayout(container)
+        grid.setSpacing(12)
+        grid.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
+        for idx, part in enumerate(parts):
+            row = idx // GRID_COLUMNS
+            col = idx % GRID_COLUMNS
+            card = PartCard(part, self._open_part)
+            grid.addWidget(card, row, col)
+            cards_out.append(card)
+        return container
+
+    def _make_project_block(self, proj, parts, cards_out):
+        """Construit le widget d'un projet : en-tête (badge code +
+        description + compteur) puis bande horizontale scrollable des
+        vignettes. Les PartCard créées sont ajoutées à 'cards_out' pour
+        que l'appelant télécharge leurs vignettes ensuite."""
+        block = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(block)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(6)
+
+        # --- En-tête : badge code + description + compteur ------------
+        header = QtWidgets.QHBoxLayout()
+        header.setSpacing(8)
+        code_lbl = QtWidgets.QLabel(proj.get("code") or "—")
+        code_lbl.setStyleSheet(
+            "font-family: monospace; font-weight: bold; "
+            "background: #e0e7ff; color: #1e3a8a; "
+            "padding: 3px 10px; border-radius: 4px; font-size: 14px;")
+        header.addWidget(code_lbl)
+        desc_lbl = QtWidgets.QLabel(
+            proj.get("description") or tr("(no description)"))
+        desc_lbl.setStyleSheet("color: #374151; font-size: 13px;")
+        header.addWidget(desc_lbl)
+        header.addStretch()
+        count_lbl = QtWidgets.QLabel(tr("{n} part(s)").format(n=len(parts)))
+        count_lbl.setStyleSheet("color: #9ca3af; font-size: 11px;")
+        header.addWidget(count_lbl)
+        v.addLayout(header)
+
+        # --- Projet vide : message, pas de bande ---------------------
+        if not parts:
+            empty = QtWidgets.QLabel(tr("No part in this project yet."))
+            empty.setStyleSheet(
+                "color: #9ca3af; font-style: italic; padding: 8px 2px;")
+            v.addWidget(empty)
+            return block
+
+        # --- Bande horizontale scrollable des vignettes --------------
+        # QScrollArea avec scroll horizontal seulement ; hauteur fixée
+        # à la carte (+ marge pour la barre de défilement).
+        strip = QtWidgets.QScrollArea()
+        strip.setWidgetResizable(True)
+        strip.setFixedHeight(CARD_HEIGHT + 28)
+        strip.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        strip.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        strip.setStyleSheet("QScrollArea { border: none; }")
+        inner = QtWidgets.QWidget()
+        h = QtWidgets.QHBoxLayout(inner)
+        h.setSpacing(12)
+        h.setContentsMargins(2, 2, 2, 2)
+        h.setAlignment(QtCore.Qt.AlignLeft)
+        for part in parts:
+            card = PartCard(part, self._open_part)
+            h.addWidget(card)
+            cards_out.append(card)
+        h.addStretch()
+        strip.setWidget(inner)
+        v.addWidget(strip)
+        return block
 
     # --- Telechargement et ouverture d'une piece -------------------
     def _open_part(self, part: dict):
