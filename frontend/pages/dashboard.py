@@ -29,6 +29,7 @@ from i18n import _, set_lang, get_lang, AVAILABLE_LANGS
 from app_core import (_apply_user_lang, _register_pwa)
 from components.header import render_app_header
 from components.admin import (_admin_configured, _open_admin_setup_dialog, _ensure_admin)
+from plugin_hooks import collect_part_badges
 from db import (UNASSIGNED, fetch_parts_full, fetch_last_used_project_id, assign_project_to_part, set_part_status_db, set_part_info_db, toggle_part_lock_db, fetch_stock, save_stock, create_part_in_db, fetch_projects, create_project_in_db, fetch_boms, fetch_bom_detail, create_bom_db, delete_bom_db, delete_part_db, add_bom_line_db, update_bom_line_db, delete_bom_line_db, bom_stock_apply, delete_project_db, fetch_part_ghost_projects, add_part_ghost, remove_part_ghost)
 
 
@@ -553,15 +554,21 @@ def dashboard_page(project: str | None = None):
                         .classes("text-gray-500 text-center p-8")
                 return
 
+            # Plugin-contributed badges (e.g. "this part has a fab note").
+            # Collected once for the whole list so each provider can answer
+            # with a single bulk query instead of one per row.
+            badges_by_part = collect_part_badges(parts)
+
             for part in parts:
                 with list_container:
+                    part_badges = badges_by_part.get(part["id"], ())
                     if part.get("is_ghost"):
                         # 'code' is the host project code (the current
                         # filter): the project this part is referenced
                         # into. Needed to remove the ghost.
-                        render_ghost_row(part, code, refresh_list)
+                        render_ghost_row(part, code, refresh_list, part_badges)
                     else:
-                        render_part_row(part, refresh_list)
+                        render_part_row(part, refresh_list, part_badges)
 
         # First fill
         refresh_list()
@@ -724,10 +731,40 @@ def dashboard_page(project: str | None = None):
 # ======================================================================
 #  RENDERING A ROW
 # ======================================================================
-def render_part_row(part: dict, on_change):
+def _render_part_badges(part: dict, badges):
+    """Render the plugin-contributed badge slot at the right end of a
+    part row. Each badge is a small icon (Material name or emoji) with an
+    optional click handler. Renders nothing (but keeps no fixed width) if
+    there are no badges."""
+    if not badges:
+        return
+    with ui.row().classes("items-center gap-1 no-wrap flex-shrink-0"):
+        for badge in badges:
+            # A single non-letter glyph (emoji) -> label; otherwise a
+            # Material icon name -> icon button.
+            is_emoji = len(badge.icon) <= 2 and not badge.icon.isalpha()
+            if is_emoji:
+                el = ui.label(badge.icon).classes(
+                    f"text-lg leading-none {badge.color}")
+                if badge.on_click:
+                    el.classes("cursor-pointer hover:brightness-110")
+            else:
+                el = ui.icon(badge.icon).classes(f"text-xl {badge.color}")
+                if badge.on_click:
+                    el.classes("cursor-pointer hover:brightness-110")
+            if badge.tooltip:
+                el.tooltip(badge.tooltip)
+            if badge.on_click:
+                # Bind the part and the handler at definition time.
+                el.on("click",
+                      lambda _e=None, cb=badge.on_click, p=part: cb(p))
+
+
+def render_part_row(part: dict, on_change, badges=()):
     """Render a part row. 'on_change' is called after an action that
     modifies the database (photo upload, project/status/lock change),
-    to refresh the list."""
+    to refresh the list. 'badges' is the list of plugin-contributed
+    PartBadge for this part (see plugin_hooks.collect_part_badges)."""
 
     part_id = part["id"]
     locked = part["locked"]
@@ -898,6 +935,9 @@ def render_part_row(part: dict, on_change):
             ui.label(loc_text) \
                 .classes(f"text-sm {loc_color} w-32 flex-shrink-0")
 
+            # --- Plugin badge slot (e.g. "has a fab note") ----------
+            _render_part_badges(part, badges)
+
             # --- Stock button ("inventory" icon, on the right) -----
             # Opens an edit dialog (quantity, location, supply,
             # component datasheet). The lock does not apply to stock.
@@ -910,7 +950,7 @@ def render_part_row(part: dict, on_change):
                 .tooltip(_("Manage stock"))
 
 
-def render_ghost_row(part: dict, host_code, on_change):
+def render_ghost_row(part: dict, host_code, on_change, badges=()):
     """Render a GHOST row: a part referenced into the currently-filtered
     project for visualization only (it lives in another project). The
     row is tinted to stand out; clicking the thumbnail or the name jumps
@@ -976,6 +1016,12 @@ def render_ghost_row(part: dict, host_code, on_change):
             loc = part["location"]
             ui.label(loc if loc else "—") \
                 .classes("text-sm text-stone-600 w-32 flex-shrink-0")
+
+            # --- Plugin badge slot (e.g. "has a fab note") ----------
+            # Badges follow the part's identity, so they show on ghost
+            # rows too (a note attached to the part is the same note
+            # whichever project it is viewed from).
+            _render_part_badges(part, badges)
 
             # --- Remove this ghost from the current project --------
             def make_remove(pid=part["id"], hc=host_code):

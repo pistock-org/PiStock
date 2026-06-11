@@ -17,6 +17,7 @@
 import os
 import json
 import datetime
+from urllib.parse import quote
 
 from sqlmodel import SQLModel, Field, Session, select
 
@@ -129,6 +130,7 @@ T = {
         "save": "Save", "cancel": "Cancel", "delete": "Delete", "edit": "Edit",
         "confirm_delete": "Delete this note?", "open_part": "Open part",
         "orphan": "⚠ part removed", "no_part": "—",
+        "has_note": "Has manufacturing note(s) — click to open",
     },
     "fr": {
         "title": "Note de Fabrication", "plugins": "Plugins", "catalog": "Catalogue",
@@ -146,6 +148,7 @@ T = {
         "save": "Enregistrer", "cancel": "Annuler", "delete": "Supprimer", "edit": "Éditer",
         "confirm_delete": "Supprimer cette note ?", "open_part": "Ouvrir la pièce",
         "orphan": "⚠ pièce supprimée", "no_part": "—",
+        "has_note": "Possède une ou des notes de fabrication — cliquer pour ouvrir",
     },
     "de": {
         "title": "Fertigungsnotiz", "plugins": "Plugins", "catalog": "Katalog",
@@ -163,6 +166,7 @@ T = {
         "save": "Speichern", "cancel": "Abbrechen", "delete": "Löschen", "edit": "Bearbeiten",
         "confirm_delete": "Diese Notiz löschen?", "open_part": "Teil öffnen",
         "orphan": "⚠ Teil entfernt", "no_part": "—",
+        "has_note": "Hat Fertigungsnotiz(en) — zum Öffnen klicken",
     },
 }
 
@@ -286,6 +290,16 @@ def _delete(note_id):
             s.commit()
 
 
+def _parts_with_notes():
+    """Return the set of part ids that have at least one note. A single
+    query, used to decorate the catalog rows (see the badge provider)."""
+    import main
+    _ensure_table()
+    with Session(main.engine) as s:
+        rows = s.exec(select(FabNote.id_parts).distinct()).all()
+    return {int(pid) for pid in rows if pid}
+
+
 def _img_dir():
     import main
     d = os.path.join(main.DATA_DIR, "uploads", "fab_notes")
@@ -347,8 +361,38 @@ def register(app):
 
     _ensure_table()
 
+    # --- Catalog badge: a small note icon on every part that has at
+    # least one fab note. Clicking it opens this page pre-filtered on
+    # that part. Guarded so an older core without the hook still loads
+    # the plugin (the page below keeps working regardless).
+    try:
+        from plugin_hooks import register_part_badge_provider, PartBadge
+
+        def _badge_provider(parts):
+            part_ids = _parts_with_notes()
+            if not part_ids:
+                return {}
+
+            def _open(p):
+                ui.navigate.to(
+                    f"/plugin/fab_notes?part={quote(p['part_name'] or '')}")
+
+            return {
+                p["id"]: PartBadge(
+                    icon="sticky_note_2",
+                    tooltip=_tr("has_note"),
+                    color="text-amber-600",
+                    on_click=_open,
+                )
+                for p in parts if p["id"] in part_ids
+            }
+
+        register_part_badge_provider(_badge_provider)
+    except ImportError:
+        pass
+
     @ui.page("/plugin/fab_notes")
-    def fab_notes_page():
+    def fab_notes_page(part: str = ""):
         with ui.header().classes("bg-stone-800 text-white shadow"):
             with ui.row().classes("w-full items-center gap-3"):
                 ui.label("🛠️ " + _tr("title")).classes("text-xl font-medium")
@@ -621,6 +665,11 @@ def register(app):
                         ui.button(_tr("save"), on_click=save).props("color=primary")
                 dlg.open()
 
+            # Deep-link from the catalog badge: ?part=<name> pre-fills the
+            # part-name filter so the page opens scoped to that part. Set
+            # before wiring on_value_change so it doesn't double-render.
+            if part:
+                name_in.set_value(part)
             proj_sel.on_value_change(lambda: render())
             status_sel.on_value_change(lambda: render())
             name_in.on_value_change(lambda: render())

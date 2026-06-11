@@ -381,3 +381,55 @@ class TestStartupMigration:
         main._ensure_missing_columns(eng)
         # Second pass: nothing left to add.
         assert main._ensure_missing_columns(eng) == []
+
+
+class TestPartBadgeHook:
+    """The frontend plugin_hooks registry lets a plugin contribute a
+    badge icon at the right end of each catalog part row. `import main`
+    puts frontend/ on sys.path, so the module is importable here."""
+
+    @pytest.fixture
+    def hooks(self):
+        # Snapshot/restore the module-global registry so tests stay
+        # isolated and order-independent.
+        import plugin_hooks as ph
+        saved = list(ph._PART_BADGE_PROVIDERS)
+        ph._PART_BADGE_PROVIDERS.clear()
+        yield ph
+        ph._PART_BADGE_PROVIDERS[:] = saved
+
+    def test_merges_providers_per_part(self, hooks):
+        parts = [{"id": 1}, {"id": 2}, {"id": 3}]
+        hooks.register_part_badge_provider(
+            lambda ps: {1: hooks.PartBadge(icon="a"), 2: hooks.PartBadge(icon="b")})
+        hooks.register_part_badge_provider(
+            lambda ps: {1: hooks.PartBadge(icon="c")})
+
+        badges = hooks.collect_part_badges(parts)
+        assert [b.icon for b in badges[1]] == ["a", "c"]  # merged, ordered
+        assert [b.icon for b in badges[2]] == ["b"]
+        assert 3 not in badges  # no provider returned a badge for it
+
+    def test_provider_receives_full_list(self, hooks):
+        seen = {}
+        hooks.register_part_badge_provider(
+            lambda ps: seen.update(n=len(ps)) or {})
+        hooks.collect_part_badges([{"id": 1}, {"id": 2}])
+        assert seen["n"] == 2  # one call with the whole list (no N+1)
+
+    def test_failing_provider_is_skipped(self, hooks):
+        def boom(ps):
+            raise RuntimeError("provider blew up")
+        hooks.register_part_badge_provider(boom)
+        hooks.register_part_badge_provider(
+            lambda ps: {1: hooks.PartBadge(icon="ok")})
+
+        badges = hooks.collect_part_badges([{"id": 1}])
+        # The healthy provider still contributes; the catalog never breaks.
+        assert [b.icon for b in badges[1]] == ["ok"]
+
+    def test_register_is_idempotent(self, hooks):
+        prov = lambda ps: {}
+        hooks.register_part_badge_provider(prov)
+        hooks.register_part_badge_provider(prov)
+        assert hooks._PART_BADGE_PROVIDERS.count(prov) == 1

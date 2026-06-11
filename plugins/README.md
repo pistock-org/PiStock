@@ -48,6 +48,44 @@ Un plugin peut **lire** librement la base de données du noyau (tables `parts`, 
 
 Un plugin ne doit **écrire** que dans ses propres tables, préfixées `plugin_<id>_*`. S'il veut modifier le stock ou les BOMs, il doit passer par les endpoints REST du noyau ou les helpers Python (`main.bom_stock_apply`, etc.) — pour bénéficier des validations, des logs, et de la cohérence transactionnelle.
 
+## Points d'extension de l'UI
+
+En plus de ses propres pages, un plugin peut contribuer à des « slots »
+prévus par le cœur, sans toucher au code du catalogue.
+
+### Badge en bout de ligne de pièce (catalogue)
+
+Le catalogue (`/catalog`) réserve un emplacement d'icônes à droite de
+chaque ligne de pièce. Un plugin peut y faire apparaître une petite
+icône — par exemple « cette pièce possède une note de fabrication ».
+
+Depuis `register(app)`, enregistre un *provider*. Il reçoit la liste
+complète des pièces affichées (un seul appel par rafraîchissement, pour
+permettre une requête groupée) et renvoie `{part_id: PartBadge}` :
+
+```python
+def register(app):
+    try:
+        from plugin_hooks import register_part_badge_provider, PartBadge
+    except ImportError:
+        return  # cœur trop ancien : le plugin marche quand même
+
+    def provider(parts):
+        ids = _parts_avec_donnee()              # 1 requête groupée
+        badge = PartBadge(
+            icon="sticky_note_2",               # nom d'icône Material, ou un emoji
+            tooltip="A une note",
+            color="text-amber-600",             # classe Tailwind
+            on_click=lambda part: ui.navigate.to(f"/plugin/mon_plugin?part={part['id']}"),
+        )
+        return {p["id"]: badge for p in parts if p["id"] in ids}
+
+    register_part_badge_provider(provider)
+```
+
+Un provider qui plante est loggé et ignoré : il ne casse jamais le
+catalogue. Voir l'implémentation de référence dans `fab_notes`.
+
 ## Accès au noyau
 
 Depuis `plugin.py`, tu peux importer :
