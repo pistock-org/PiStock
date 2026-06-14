@@ -1,0 +1,170 @@
+<svg viewBox="0 0 1440 980" xmlns="http://www.w3.org/2000/svg" font-family="'DejaVu Sans','Helvetica Neue',Arial,sans-serif">
+  <defs>
+    <marker id="arrEndBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#2f72c4"/>
+    </marker>
+    <marker id="arrStartBlue" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M10,0 L0,5 L10,10 Z" fill="#2f72c4"/>
+    </marker>
+    <marker id="arrEndGrey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#9aa3ad"/>
+    </marker>
+    <marker id="arrStartGrey" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M10,0 L0,5 L10,10 Z" fill="#9aa3ad"/>
+    </marker>
+  </defs>
+
+  <!-- background -->
+  <rect x="0" y="0" width="1440" height="980" fill="#ffffff"/>
+
+  <!-- title -->
+  <text x="64" y="62" font-size="34" font-weight="700" fill="#1f2933">PiStock — system architecture</text>
+  <text x="64" y="94" font-size="17" fill="#64748b">Self-hosted PLM &amp; inventory for FreeCAD, running on a Raspberry Pi over your local network.</text>
+
+  <!-- home / LAN boundary -->
+  <rect x="60" y="132" width="1320" height="812" rx="28" fill="#fbfcfe" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="2 8" stroke-linecap="round"/>
+  <rect x="92" y="118" width="330" height="32" rx="16" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+  <circle cx="116" cy="134" r="6" fill="#2f72c4"/>
+  <text x="132" y="139" font-size="14.5" font-weight="600" fill="#3b4654">Home network · Wi-Fi / LAN (private)</text>
+
+  <!-- ============ LAPTOP A (active) ============ -->
+  <g>
+    <rect x="150" y="185" width="210" height="135" rx="10" fill="#ffffff" stroke="#2f72c4" stroke-width="3"/>
+    <rect x="162" y="197" width="186" height="100" rx="5" fill="#eef4fb"/>
+    <text x="255" y="217" font-size="13" font-weight="700" fill="#2f72c4" text-anchor="middle">FreeCAD</text>
+    <rect x="182" y="230" width="30" height="26" rx="5" fill="#e6358a"/>
+    <rect x="224" y="238" width="74" height="10" rx="3" fill="#94a3b8"/>
+    <circle cx="320" cy="250" r="12" fill="#374151"/>
+    <rect x="196" y="270" width="118" height="18" rx="9" fill="#e3edfb"/>
+    <text x="255" y="283" font-size="9.5" font-weight="600" fill="#2f72c4" text-anchor="middle">PiStock Explorer</text>
+    <path d="M132,320 L378,320 L396,338 L114,338 Z" fill="#dfe4ea" stroke="#c2c9d3" stroke-width="1.5"/>
+    <text x="255" y="362" font-size="16" font-weight="700" fill="#1f2933" text-anchor="middle">Your laptop · FreeCAD</text>
+    <text x="255" y="384" font-size="14" fill="#64748b" text-anchor="middle">with the PiStock workbench</text>
+  </g>
+
+  <!-- ============ LAPTOP B (greyed, optional) ============ -->
+  <g opacity="0.55">
+    <rect x="1080" y="185" width="210" height="135" rx="10" fill="#f1f3f6" stroke="#9aa3ad" stroke-width="2.5" stroke-dasharray="6 5"/>
+    <rect x="1092" y="197" width="186" height="100" rx="5" fill="#e8ebef"/>
+    <text x="1185" y="217" font-size="13" font-weight="700" fill="#7c8694" text-anchor="middle">FreeCAD</text>
+    <rect x="1112" y="230" width="30" height="26" rx="5" fill="#b7bfca"/>
+    <rect x="1154" y="238" width="74" height="10" rx="3" fill="#b7bfca"/>
+    <circle cx="1250" cy="250" r="12" fill="#aab2bd"/>
+    <path d="M1062,320 L1308,320 L1326,338 L1044,338 Z" fill="#e1e5ea" stroke="#b7bfca" stroke-width="1.5"/>
+    <text x="1185" y="362" font-size="16" font-weight="700" fill="#7c8694" text-anchor="middle">Other machines</text>
+    <text x="1185" y="384" font-size="14" fill="#8b95a1" text-anchor="middle">collaborate from the same LAN</text>
+  </g>
+
+  <!-- ============ RASPBERRY PI + PISTOCK (center hub) ============ -->
+  <g>
+    <rect x="540" y="408" width="360" height="304" rx="18" fill="#ffffff" stroke="#2f72c4" stroke-width="2.5"/>
+
+    <!-- Pi board icon -->
+    <g transform="translate(562,430)">
+      <rect x="0" y="6" width="78" height="42" rx="5" fill="#2f7d4f" stroke="#245f3c" stroke-width="1.5"/>
+      <!-- GPIO pins -->
+      <g fill="#d9a441">
+        <rect x="6" y="2" width="3" height="6" rx="1"/><rect x="11" y="2" width="3" height="6" rx="1"/>
+        <rect x="16" y="2" width="3" height="6" rx="1"/><rect x="21" y="2" width="3" height="6" rx="1"/>
+        <rect x="26" y="2" width="3" height="6" rx="1"/><rect x="31" y="2" width="3" height="6" rx="1"/>
+        <rect x="36" y="2" width="3" height="6" rx="1"/><rect x="41" y="2" width="3" height="6" rx="1"/>
+        <rect x="46" y="2" width="3" height="6" rx="1"/><rect x="51" y="2" width="3" height="6" rx="1"/>
+        <rect x="56" y="2" width="3" height="6" rx="1"/><rect x="61" y="2" width="3" height="6" rx="1"/>
+      </g>
+      <!-- SoC -->
+      <rect x="28" y="18" width="22" height="20" rx="2" fill="#222a33"/>
+      <rect x="34" y="24" width="10" height="8" rx="1" fill="#3a4654"/>
+      <!-- USB / ethernet ports -->
+      <rect x="72" y="14" width="12" height="10" rx="1.5" fill="#c7ccd4" stroke="#a7aeb8" stroke-width="0.8"/>
+      <rect x="72" y="30" width="12" height="10" rx="1.5" fill="#c7ccd4" stroke="#a7aeb8" stroke-width="0.8"/>
+    </g>
+
+    <text x="660" y="448" font-size="19" font-weight="700" fill="#1f2933">Raspberry Pi 4 / 5</text>
+    <text x="660" y="472" font-size="14.5" font-weight="600" fill="#2f72c4">PiStock server</text>
+
+    <line x1="562" y1="496" x2="878" y2="496" stroke="#e6ebf1" stroke-width="1.5"/>
+    <text x="562" y="520" font-size="11" font-weight="700" fill="#94a3b8">SOFTWARE STACK</text>
+
+    <!-- chips -->
+    <g font-size="13.5" font-weight="600" fill="#3b4654">
+      <!-- row 1 -->
+      <rect x="562" y="532" width="150" height="34" rx="8" fill="#f3f6fa" stroke="#e3e9f0" stroke-width="1"/>
+      <circle cx="580" cy="549" r="5" fill="#009688"/><text x="592" y="554">FastAPI</text>
+      <rect x="728" y="532" width="150" height="34" rx="8" fill="#f3f6fa" stroke="#e3e9f0" stroke-width="1"/>
+      <circle cx="746" cy="549" r="5" fill="#4f9cd6"/><text x="758" y="554">NiceGUI</text>
+      <!-- row 2 -->
+      <rect x="562" y="574" width="150" height="34" rx="8" fill="#f3f6fa" stroke="#e3e9f0" stroke-width="1"/>
+      <circle cx="580" cy="591" r="5" fill="#0f80cc"/><text x="592" y="596">SQLite3</text>
+      <rect x="728" y="574" width="150" height="34" rx="8" fill="#f3f6fa" stroke="#e3e9f0" stroke-width="1"/>
+      <circle cx="746" cy="591" r="5" fill="#3776ab"/><text x="758" y="596">Python</text>
+      <!-- row 3 -->
+      <rect x="562" y="616" width="150" height="34" rx="8" fill="#f3f6fa" stroke="#e3e9f0" stroke-width="1"/>
+      <circle cx="580" cy="633" r="5" fill="#87b441"/><text x="592" y="638">glTF / glb</text>
+      <rect x="728" y="616" width="150" height="34" rx="8" fill="#f3f6fa" stroke="#e3e9f0" stroke-width="1"/>
+      <circle cx="746" cy="633" r="5" fill="#6d4aff"/><text x="758" y="638">Uvicorn</text>
+    </g>
+
+    <!-- footer: address + https -->
+    <g transform="translate(562,668)">
+      <rect x="0" y="0" width="16" height="12" rx="2" fill="#2f72c4"/>
+      <path d="M3,0 a5,5 0 0 1 10,0" fill="none" stroke="#2f72c4" stroke-width="2"/>
+      <text x="24" y="11" font-size="14" font-weight="600" fill="#1f2933">pistock.local : 8000</text>
+      <text x="196" y="11" font-size="14" fill="#64748b">· HTTPS</text>
+    </g>
+  </g>
+
+  <!-- ============ CELLAR + SMARTPHONE (PWA) ============ -->
+  <!-- ground line -->
+  <line x1="470" y1="772" x2="970" y2="772" stroke="#b6a892" stroke-width="3"/>
+  <!-- little house on the ground -->
+  <g>
+    <path d="M495,748 L525,724 L555,748 Z" fill="#cdd5de"/>
+    <rect x="503" y="748" width="44" height="24" fill="#ffffff" stroke="#c2c9d3" stroke-width="1.5"/>
+    <rect x="518" y="756" width="13" height="16" fill="#b7bfca"/>
+  </g>
+  <!-- cellar room -->
+  <rect x="485" y="772" width="480" height="148" rx="6" fill="#eef0f3" stroke="#dde2e8" stroke-width="1.5"/>
+  <text x="503" y="792" font-size="11" font-weight="700" fill="#9aa3ad">CELLAR</text>
+  <line x1="500" y1="858" x2="950" y2="858" stroke="#dfe4ea" stroke-width="1" stroke-dasharray="3 6"/>
+  <line x1="500" y1="890" x2="950" y2="890" stroke="#dfe4ea" stroke-width="1" stroke-dasharray="3 6"/>
+
+  <!-- phone -->
+  <g>
+    <rect x="688" y="790" width="64" height="120" rx="13" fill="#ffffff" stroke="#2f72c4" stroke-width="2.5"/>
+    <rect x="706" y="797" width="28" height="3" rx="1.5" fill="#cbd5e1"/>
+    <rect x="694" y="806" width="52" height="92" rx="4" fill="#eef4fb"/>
+    <rect x="700" y="814" width="40" height="14" rx="3" fill="#cdd9ea"/>
+    <rect x="700" y="833" width="40" height="14" rx="3" fill="#cdd9ea"/>
+    <rect x="700" y="852" width="40" height="14" rx="3" fill="#cdd9ea"/>
+    <rect x="710" y="900" width="20" height="3" rx="1.5" fill="#cbd5e1"/>
+    <text x="772" y="826" font-size="16" font-weight="700" fill="#1f2933">Smartphone · PWA</text>
+    <text x="772" y="848" font-size="14" fill="#64748b">browse &amp; update your stock</text>
+    <text x="772" y="869" font-size="13.5" font-style="italic" fill="#8b95a1">right from the cellar</text>
+  </g>
+
+  <!-- ============ CONNECTIONS ============ -->
+  <!-- Laptop A <-> Pi -->
+  <line x1="360" y1="262" x2="540" y2="472" stroke="#2f72c4" stroke-width="2.5"
+        marker-start="url(#arrStartBlue)" marker-end="url(#arrEndBlue)"/>
+  <g>
+    <rect x="362" y="338" width="182" height="42" rx="10" fill="#ffffff" stroke="#d6dee8" stroke-width="1.2"/>
+    <text x="453" y="357" font-size="13" font-weight="600" fill="#2f72c4" text-anchor="middle">push / pull parts</text>
+    <text x="453" y="373" font-size="12" fill="#64748b" text-anchor="middle">.FCStd files · REST API</text>
+  </g>
+
+  <!-- Laptop B <-> Pi (greyed) -->
+  <line x1="1080" y1="262" x2="900" y2="472" stroke="#9aa3ad" stroke-width="2.5" stroke-dasharray="7 6"
+        marker-start="url(#arrStartGrey)" marker-end="url(#arrEndGrey)"/>
+  <g>
+    <rect x="888" y="346" width="204" height="30" rx="10" fill="#ffffff" stroke="#dde2e8" stroke-width="1.2"/>
+    <text x="990" y="365" font-size="12.5" fill="#7c8694" text-anchor="middle">any machine on the network</text>
+  </g>
+
+  <!-- Phone <-> Pi -->
+  <line x1="720" y1="712" x2="720" y2="790" stroke="#2f72c4" stroke-width="2.5"
+        marker-start="url(#arrStartBlue)" marker-end="url(#arrEndBlue)"/>
+  <g>
+    <rect x="742" y="726" width="232" height="34" rx="10" fill="#ffffff" stroke="#d6dee8" stroke-width="1.2"/>
+    <text x="858" y="747" font-size="12.5" font-weight="600" fill="#2f72c4" text-anchor="middle">HTTPS · web UI + WebGL 3D viewer</text>
+  </g>
+</svg>
