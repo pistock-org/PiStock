@@ -161,9 +161,9 @@ TRANSLATIONS = {
             "Ouvrir un fichier FreeCAD existant",
         # Section "Pieces PiStock"
         "PiStock parts": "Pièces PiStock",
-        "Project:": "Projet :",
-        "All projects": "Tous les projets",
-        "(No project)": "(Sans projet)",
+        "Collection:": "Collection :",
+        "All collections": "Toutes les collections",
+        "(No collection)": "(Sans collection)",
         "Refresh": "Actualiser",
         "Loading…": "Chargement…",
         "{n} part(s)": "{n} pièce(s)",
@@ -172,10 +172,10 @@ TRANSLATIONS = {
             "Aucune pièce correspondant à ce filtre.\nUtilisez la macro PiStock Exporter pour publier depuis un document, ou créez une pièce manuellement via l'interface web.",
         "(no thumbnail)": "(pas de vignette)",
         "(no description)": "(pas de description)",
-        "No part in this project yet.":
-            "Aucune pièce dans ce projet pour l'instant.",
-        "Included from another project (visualization only)":
-            "Incluse depuis un autre projet (visualisation seulement)",
+        "No part in this collection yet.":
+            "Aucune pièce dans cette collection pour l'instant.",
+        "Included from another collection (visualization only)":
+            "Incluse depuis une autre collection (visualisation seulement)",
         "locked": "verrouillée",
         "No FreeCAD file associated to this part.":
             "Aucun fichier FreeCAD associé à cette pièce.",
@@ -316,7 +316,7 @@ class PartCard(QtWidgets.QFrame):
                 "padding: 1px 6px; border-radius: 3px; "
                 "font-size: 10px; font-weight: 600;")
             ghost_label.setToolTip(
-                tr("Included from another project (visualization only)"))
+                tr("Included from another collection (visualization only)"))
             layout.addWidget(ghost_label, alignment=QtCore.Qt.AlignCenter)
 
         # --- Version + statut sur la meme ligne -----------------------
@@ -452,7 +452,7 @@ class PiStockExplorerWidget(QtWidgets.QWidget):
 
         # Barre de filtre + actualiser
         filter_row = QtWidgets.QHBoxLayout()
-        filter_row.addWidget(QtWidgets.QLabel(tr("Project:")))
+        filter_row.addWidget(QtWidgets.QLabel(tr("Collection:")))
         self.project_combo = QtWidgets.QComboBox()
         self.project_combo.setMinimumWidth(220)
         self.project_combo.currentIndexChanged.connect(self._refresh_grid)
@@ -580,8 +580,8 @@ class PiStockExplorerWidget(QtWidgets.QWidget):
         # refresh en boucle.
         self.project_combo.blockSignals(True)
         self.project_combo.clear()
-        self.project_combo.addItem(tr("All projects"), "")
-        self.project_combo.addItem(tr("(No project)"), "__none__")
+        self.project_combo.addItem(tr("All collections"), "")
+        self.project_combo.addItem(tr("(No collection)"), "__none__")
         for proj in self.projects:
             label = f"{proj['code']}"
             if proj.get("description"):
@@ -753,7 +753,7 @@ class PiStockExplorerWidget(QtWidgets.QWidget):
 
         # --- Projet vide : message, pas de bande ---------------------
         if not parts:
-            empty = QtWidgets.QLabel(tr("No part in this project yet."))
+            empty = QtWidgets.QLabel(tr("No part in this collection yet."))
             empty.setStyleSheet(
                 "color: #9ca3af; font-style: italic; padding: 8px 2px;")
             v.addWidget(empty)

@@ -240,7 +240,7 @@ def create_bom(description: str = Form(default=""),
             if session.get(Project, id_project) is None:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Projet id={id_project} introuvable."
+                    detail=f"Collection id={id_project} introuvable."
                 )
         code = _next_bom_code(session)
         bom = Bom(code=code, description=description, id_project=id_project)
@@ -555,7 +555,7 @@ def create_bom_from_assembly(req: BomFromAssemblyRequest):
             if session.get(Project, req.id_project) is None:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Projet id={req.id_project} introuvable."
+                    detail=f"Collection id={req.id_project} introuvable."
                 )
 
         # Phase 1: resolve all lines into (part_id, qty), creating the

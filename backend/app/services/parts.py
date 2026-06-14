@@ -252,7 +252,7 @@ def assign_project(part_id: int,
             if project is None:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Projet id={project_id} introuvable."
+                    detail=f"Collection id={project_id} introuvable."
                 )
 
         part.id_project = project_id

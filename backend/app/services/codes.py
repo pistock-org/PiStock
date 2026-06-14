@@ -69,7 +69,7 @@ def _next_project_code(session: Session) -> str:
     if next_n > PROJECT_CODE_MAX:
         raise HTTPException(
             status_code=507,  # 507 Insufficient Storage
-            detail="Limite de codes projet atteinte (ZZZ)."
+            detail="Limite de codes de collection atteinte (ZZZ)."
         )
     return _int_to_code(next_n)
 

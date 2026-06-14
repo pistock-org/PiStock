@@ -44,7 +44,7 @@ def delete_project_db(project_id: int):
     with Session(main.engine) as session:
         project = session.get(main.Project, project_id)
         if project is None:
-            return False, "Projet introuvable.", None
+            return False, "Collection introuvable.", None
         parts_left = session.exec(
             select(main.Parts).where(main.Parts.id_project == project_id)
         ).all()
@@ -54,7 +54,7 @@ def delete_project_db(project_id: int):
         if parts_left or boms_left:
             return False, (
                 f"Impossible : {len(parts_left)} pièce(s) et "
-                f"{len(boms_left)} BOM(s) rattachées au projet "
+                f"{len(boms_left)} BOM(s) rattachées à la collection "
                 f"« {project.code} »."
             ), {
                 "parts": [
@@ -76,7 +76,7 @@ def delete_project_db(project_id: int):
             session.delete(ref)
         code = project.code
         session.delete(project); session.commit()
-        return True, f"Projet « {code} » supprimé.", None
+        return True, f"Collection « {code} » supprimée.", None
 def _db_project():
     """Helper dedicated to projects: returns engine + Project class +
     the next-code generation function. We keep a separate helper so as
@@ -213,11 +213,11 @@ def assign_project_to_part(part_id: int, project_id: int | None):
             return (False, f"Pièce '{part.part_name}' verrouillée.")
         if project_id is not None:
             if session.get(Project_cls, project_id) is None:
-                return (False, f"Projet introuvable.")
+                return (False, f"Collection introuvable.")
         part.id_project = project_id
         session.add(part)
         session.commit()
-        return (True, "Projet assigné.")
+        return (True, "Collection assignée.")
 
 
 def set_part_status_db(part_id: int, new_status: str):
@@ -291,9 +291,9 @@ def add_part_ghost(part_id: int, project_id: int):
             return (False, "Pièce introuvable.")
         project = session.get(main.Project, project_id)
         if project is None:
-            return (False, "Projet introuvable.")
+            return (False, "Collection introuvable.")
         if part.id_project == project_id:
-            return (False, "C'est déjà le projet principal de la pièce.")
+            return (False, "C'est déjà la collection principale de la pièce.")
         existing = session.exec(
             select(main.PartRef)
             .where(main.PartRef.id_parts == part_id)
@@ -315,7 +315,7 @@ def remove_part_ghost(part_id: int, project_code: str):
             select(main.Project).where(main.Project.code == project_code)
         ).first()
         if project is None:
-            return (False, "Projet introuvable.")
+            return (False, "Collection introuvable.")
         ref = session.exec(
             select(main.PartRef)
             .where(main.PartRef.id_parts == part_id)
@@ -564,7 +564,7 @@ def create_project_in_db(description: str):
         session.add(project)
         session.commit()
         session.refresh(project)
-        return (True, f"Projet '{code}' créé.", code)
+        return (True, f"Collection '{code}' créée.", code)
 
 
 # ----------------------------------------------------------------------
@@ -683,7 +683,7 @@ def create_bom_db(description: str, id_project: int | None):
     with Session(main.engine) as session:
         if id_project is not None:
             if session.get(main.Project, id_project) is None:
-                return (False, "Projet introuvable.", None)
+                return (False, "Collection introuvable.", None)
         try:
             code = main._next_bom_code(session)
         except Exception as e:

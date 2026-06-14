@@ -11,10 +11,10 @@ msgid "  … and {count} others"
 msgstr "  … und {count} weitere"
 
 msgid " • project {code}"
-msgstr " • Projekt {code}"
+msgstr " • Sammlung {code}"
 
 msgid "(No project)"
-msgstr "(Kein Projekt)"
+msgstr "(Kein Sammlung)"
 
 msgid "(empty BOM)"
 msgstr "(leere Stückliste)"
@@ -35,10 +35,10 @@ msgid "+ New part"
 msgstr "+ Neues Teil"
 
 msgid "+ New project"
-msgstr "+ Neues Projekt"
+msgstr "+ Neues Sammlung"
 
 msgid "A project can only be deleted if it no longer contains any part and any BOM."
-msgstr "Ein Projekt kann nur gelöscht werden, wenn es kein Teil und keine Stückliste mehr enthält."
+msgstr "Ein Sammlung kann nur gelöscht werden, wenn es kein Teil und keine Stückliste mehr enthält."
 
 msgid "Add a photo of the part in stock"
 msgstr "Ein Foto des Teils im Lager hinzufügen"
@@ -68,13 +68,13 @@ msgid "All its PLM revisions, its stock and its associated files will be erased.
 msgstr "Alle PLM-Revisionen, der Bestand und die zugehörigen Dateien werden gelöscht. Dieser Vorgang ist unwiderruflich."
 
 msgid "All projects"
-msgstr "Alle Projekte"
+msgstr "Alle Sammlungen"
 
 msgid "An admin account already exists — reload the page."
 msgstr "Ein Admin-Konto existiert bereits — laden Sie die Seite neu."
 
 msgid "Assign a project to « {name} »"
-msgstr "« {name} » einem Projekt zuordnen"
+msgstr "« {name} » einem Sammlung zuordnen"
 
 msgid "Attached BOMs:"
 msgstr "Zugeordnete Stücklisten:"
@@ -125,7 +125,7 @@ msgid "Choose a file"
 msgstr "Datei auswählen"
 
 msgid "Click to change project"
-msgstr "Klicken, um das Projekt zu ändern"
+msgstr "Klicken, um das Sammlung zu ändern"
 
 msgid "Click to lock"
 msgstr "Klicken zum Sperren"
@@ -155,7 +155,7 @@ msgid "Confirm password"
 msgstr "Passwort bestätigen"
 
 msgid "Confirm project deletion"
-msgstr "Projektlöschung bestätigen"
+msgstr "Sammlunglöschung bestätigen"
 
 msgid "Create"
 msgstr "Erstellen"
@@ -173,7 +173,7 @@ msgid "Current password is invalid."
 msgstr "Aktuelles Passwort ungültig."
 
 msgid "Current project"
-msgstr "Aktuelles Projekt"
+msgstr "Aktuelles Sammlung"
 
 msgid "Cycle detected — display interrupted."
 msgstr "Zyklus erkannt — Anzeige abgebrochen."
@@ -191,7 +191,7 @@ msgid "Delete this BOM"
 msgstr "Diese Stückliste löschen"
 
 msgid "Delete this project"
-msgstr "Dieses Projekt löschen"
+msgstr "Dieses Sammlung löschen"
 
 msgid "Delete this revision"
 msgstr "Diese Revision löschen"
@@ -263,7 +263,7 @@ msgid "New password (min. 6 chars)"
 msgstr "Neues Passwort (mind. 6 Zeichen)"
 
 msgid "New project"
-msgstr "Neues Projekt"
+msgstr "Neues Sammlung"
 
 msgid "No BOM in the database."
 msgstr "Keine Stückliste in der Datenbank."
@@ -281,7 +281,7 @@ msgid "No other BOM available to be added as a sub-BOM."
 msgstr "Keine andere Stückliste verfügbar, die als Unter-Stückliste hinzugefügt werden kann."
 
 msgid "No part for project '{code}'."
-msgstr "Kein Teil für Projekt '{code}'."
+msgstr "Kein Teil für Sammlung '{code}'."
 
 msgid "No part in the database yet. Click « + New part » or export one from FreeCAD."
 msgstr "Noch kein Teil in der Datenbank. Klicken Sie auf « + Neues Teil » oder exportieren Sie eines aus FreeCAD."
@@ -293,10 +293,10 @@ msgid "No plugin installed"
 msgstr "Kein Plugin installiert"
 
 msgid "No project yet. Click « + New project » to create one."
-msgstr "Noch kein Projekt. Klicken Sie auf « + Neues Projekt », um eines zu erstellen."
+msgstr "Noch kein Sammlung. Klicken Sie auf « + Neues Sammlung », um eines zu erstellen."
 
 msgid "No project yet. Create one with « + New project »."
-msgstr "Noch kein Projekt. Erstellen Sie eines mit « + Neues Projekt »."
+msgstr "Noch kein Sammlung. Erstellen Sie eines mit « + Neues Sammlung »."
 
 msgid "No revision yet."
 msgstr "Noch keine Revision."
@@ -332,7 +332,7 @@ msgid "Permanently delete"
 msgstr "Dauerhaft löschen"
 
 msgid "Permanently delete project « {code} »?"
-msgstr "Projekt « {code} » dauerhaft löschen?"
+msgstr "Sammlung « {code} » dauerhaft löschen?"
 
 msgid "PiStock — 3D View"
 msgstr "PiStock — 3D-Ansicht"
@@ -347,22 +347,22 @@ msgid "Plugins"
 msgstr "Plugins"
 
 msgid "Project"
-msgstr "Projekt"
+msgstr "Sammlung"
 
 msgid "Project (optional)"
-msgstr "Projekt (optional)"
+msgstr "Sammlung (optional)"
 
 msgid "Project created but not found, aborting."
-msgstr "Projekt erstellt, aber nicht gefunden, Abbruch."
+msgstr "Sammlung erstellt, aber nicht gefunden, Abbruch."
 
 msgid "Project {code} created and assigned."
-msgstr "Projekt {code} erstellt und zugeordnet."
+msgstr "Sammlung {code} erstellt und zugeordnet."
 
 msgid "Project:"
-msgstr "Projekt:"
+msgstr "Sammlung:"
 
 msgid "Projects"
-msgstr "Projekte"
+msgstr "Sammlungen"
 
 msgid "Qty"
 msgstr "Anz."
@@ -467,10 +467,10 @@ msgid "e.g.: bracket-v2"
 msgstr "z.B.: bracket-v2"
 
 msgid "no project"
-msgstr "kein Projekt"
+msgstr "kein Sammlung"
 
 msgid "project {code}"
-msgstr "Projekt {code}"
+msgstr "Sammlung {code}"
 
 msgid "status « {status} »"
 msgstr "Status « {status} »"
@@ -537,19 +537,19 @@ msgid "Unlock"
 msgstr "Entsperren"
 
 msgid "PiStock — Projects"
-msgstr "PiStock — Projekte"
+msgstr "PiStock — Sammlungen"
 
 msgid "Projects overview"
-msgstr "Projektübersicht"
+msgstr "Sammlungübersicht"
 
 msgid "Open this project in the catalog"
-msgstr "Dieses Projekt im Katalog öffnen"
+msgstr "Dieses Sammlung im Katalog öffnen"
 
 msgid "No part in this project yet."
-msgstr "Noch kein Teil in diesem Projekt."
+msgstr "Noch kein Teil in diesem Sammlung."
 
 msgid "No project yet. Create one from the catalog."
-msgstr "Noch kein Projekt. Erstellen Sie eines im Katalog."
+msgstr "Noch kein Sammlung. Erstellen Sie eines im Katalog."
 
 msgid "#tags, codes…"
 msgstr "#Tags, Codes…"
@@ -567,28 +567,28 @@ msgid "from {code}"
 msgstr "aus {code}"
 
 msgid "Use in another project"
-msgstr "In einem anderen Projekt verwenden"
+msgstr "In einem anderen Sammlung verwenden"
 
 msgid "Go to the part's project"
-msgstr "Zum Projekt des Teils springen"
+msgstr "Zum Sammlung des Teils springen"
 
 msgid "Currently included in:"
 msgstr "Aktuell einbezogen in:"
 
 msgid "Select a project."
-msgstr "Wählen Sie ein Projekt."
+msgstr "Wählen Sie ein Sammlung."
 
 msgid "no main project"
-msgstr "kein Hauptprojekt"
+msgstr "kein Hauptsammlung"
 
 msgid "Remove from this project"
-msgstr "Aus diesem Projekt entfernen"
+msgstr "Aus diesem Sammlung entfernen"
 
 msgid "Included from another project (visualization only)"
-msgstr "Aus einem anderen Projekt einbezogen (nur zur Anzeige)"
+msgstr "Aus einem anderen Sammlung einbezogen (nur zur Anzeige)"
 
 msgid "Show this part as a reference (ghost) in another project, for visualization only. It stays in its main project."
-msgstr "Dieses Teil als Referenz (Geist) in einem anderen Projekt anzeigen, nur zur Visualisierung. Es bleibt in seinem Hauptprojekt."
+msgstr "Dieses Teil als Referenz (Geist) in einem anderen Sammlung anzeigen, nur zur Visualisierung. Es bleibt in seinem Hauptsammlung."
 
 msgid "← Back"
 msgstr "← Zurück"

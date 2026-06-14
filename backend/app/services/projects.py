@@ -73,7 +73,7 @@ def delete_project(
         if project is None:
             raise HTTPException(
                 status_code=404,
-                detail=f"Projet id={project_id} introuvable."
+                detail=f"Collection id={project_id} introuvable."
             )
         parts_left = session.exec(
             select(Parts).where(Parts.id_project == project_id)
@@ -86,7 +86,7 @@ def delete_project(
                 status_code=409,
                 detail={
                     "message": (
-                        f"Impossible de supprimer le projet "
+                        f"Impossible de supprimer la collection "
                         f"'{project.code}' : "
                         f"{len(parts_left)} pieces(s) et "
                         f"{len(boms_left)} BOM(s) y sont encore "
