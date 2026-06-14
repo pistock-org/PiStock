@@ -9,7 +9,7 @@
 
 PiStock is an open-source **Product Lifecycle Management (PLM) and inventory tracking** ecosystem built for makers, hackerspaces, and small engineering workshops. It acts as a digital bridge between your CAD models and your physical parts, running efficiently on low-power hardware like a Raspberry Pi.
 
-The idea is simple: **stop re-ordering new parts when you already have what you need.** PiStock helps you catalog the profiles, fasteners, salvaged components, and printed parts piling up in your workshop — and actually reuse them in your projects, straight from FreeCAD.
+The idea is simple: **stop re-ordering new parts when you already have what you need.** PiStock helps you catalog the profiles, fasteners, salvaged components, and printed parts piling up in your workshop — and actually reuse them in your collections, straight from FreeCAD.
 
 > **⚠️ Status — early development.** PiStock works and is usable today (see the videos below), but it's young: the architecture and APIs may change in breaking ways. Issues and feedback are very welcome; pull requests are not being actively merged yet while the core stabilizes.
 
@@ -21,12 +21,10 @@ Short screen-capture walkthroughs introduce PiStock and show how to install it.
 
 > 🇫🇷 **The videos are in French.** For now, turn on YouTube's auto-translated subtitles (or the auto-dubbed audio track). Not ideal, I know — this is a personal project, so it'll do for now. If PiStock gains traction, I'll do better.
 
-<!-- TODO: wrap the "Presentation" thumbnail below in its youtu.be link once the overview video is published. -->
-
 | Presentation | Introduction | Installation |
 | --- | --- | --- |
-| ![PiStock — Presentation](https://github.com/pistock-org/PiStock/raw/main/docs/images/youtube-pistock_presentation.png) | [![PiStock — Introduction](https://github.com/pistock-org/PiStock/raw/main/docs/images/youtube-intro.jpg)](https://youtu.be/7C0r99gCSrI) | [![PiStock — Installation](https://github.com/pistock-org/PiStock/raw/main/docs/images/youtube-install.jpg)](https://youtu.be/Fmihq0oUiy8) |
-| **▶ Coming soon** | **[▶ Watch the introduction](https://youtu.be/7C0r99gCSrI)** | **[▶ Watch the installation guide](https://youtu.be/Fmihq0oUiy8)** |
+| [![PiStock — Presentation](https://github.com/pistock-org/PiStock/raw/main/docs/images/youtube-pistock_presentation.png)](https://youtu.be/52-Wgqm6dp0) | [![PiStock — Introduction](https://github.com/pistock-org/PiStock/raw/main/docs/images/youtube-intro.jpg)](https://youtu.be/7C0r99gCSrI) | [![PiStock — Installation](https://github.com/pistock-org/PiStock/raw/main/docs/images/youtube-install.jpg)](https://youtu.be/Fmihq0oUiy8) |
+| **[▶ Watch the presentation](https://youtu.be/52-Wgqm6dp0)** | **[▶ Watch the introduction](https://youtu.be/7C0r99gCSrI)** | **[▶ Watch the installation guide](https://youtu.be/Fmihq0oUiy8)** |
 
 ---
 
@@ -44,14 +42,14 @@ Export a part from FreeCAD and it shows up in the browser within seconds — wit
 
 **Working today**
 
-- ✅ **Web dashboard** with two main views: *Projects* (parts grouped by subject) and *Catalog* (all parts, filterable).
+- ✅ **Web dashboard** with two main views: *Collections* (parts grouped by subject) and *Catalog* (all parts, filterable).
 - ✅ **FreeCAD workbench** — the *PiStock Explorer* and part exporter let you push `.FCStd` files and metadata directly to your server, and pull parts back into a working folder.
 - ✅ **Browser 3D viewer** — inspect parts and assemblies in the browser via optimized `.glb` rendering, no CAD software required (great for collaborators who don't run FreeCAD).
 - ✅ **Revision control** — track part versions by revision index.
 - ✅ **Mobile-ready (PWA)** — the web app installs as a Progressive Web App, so you can browse and update your stock from your phone.
 - ✅ **Inventory tracking** — quantity, physical location, supplier, status (`init` → `review` → `asset`), keywords, and an optional component datasheet per part.
-- ✅ **Stores & projects** — organize parts into stores (e.g. mechanical stock, fasteners) and link them into projects.
-- ✅ **"Ghost" links** — reference shared stock parts inside a project without duplicating them.
+- ✅ **Stores & collections** — organize parts into stores (e.g. mechanical stock, fasteners) and link them into collections.
+- ✅ **"Ghost" links** — reference shared stock parts inside a collection without duplicating them.
 - ✅ **Manufacturing notes** — assembly instructions and docs attached to a part.
 - ✅ **Stock search** — by name, location, supplier, quantity, etc.
 - ✅ **Plugin architecture** — a modular core; ships with admin (DB export/restore), notes, manufacturing notes, and stock search plugins.
@@ -63,7 +61,7 @@ Export a part from FreeCAD and it shows up in the browser within seconds — wit
 - 🚧 **Docker deployment** — one-command containerized setup.
 - 🚧 **Public extension API** — a documented way to build your own extensions. Community add-ons (component pricing APIs, pick-to-light LED shelves, QR/camera stock workflows, …) will build on top of it.
 
-> ℹ️ **On the word "project":** in PiStock a *project* is a **grouping of parts by subject**, not time-based project management. (The term is overloaded everywhere — this is what it means here.)
+> ℹ️ **On the word "collection":** in PiStock a *collection* is a **grouping of parts by subject** (not time-based project management). It was originally called a *project*, but the term *collection* was preferred for clarity.
 
 ---
 
