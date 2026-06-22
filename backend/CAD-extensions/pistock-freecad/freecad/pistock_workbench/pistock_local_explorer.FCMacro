@@ -1,0 +1,490 @@
+# PiStock — PLM/inventory tool for FreeCAD-based workshops
+# Copyright (C) 2026 GA3Dtech
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+PiStock Local Explorer — variante LOCALE de PiStock Explorer.
+
+Au lieu d'interroger le serveur PiStock, cette macro explore un dossier
+« master » local et tous ses sous-dossiers. Elle affiche une arborescence
+dépliée : un bloc par dossier (indenté selon sa profondeur), et sous chaque
+dossier une bande horizontale scrollable de MINI-vignettes — une par fichier
+FreeCAD (.FCStd) qu'il contient directement. Cliquer une vignette ouvre le
+fichier dans FreeCAD.
+
+Les vignettes sont extraites directement des .FCStd (ce sont des archives
+ZIP contenant 'thumbnails/Thumbnail.png' quand l'option « enregistrer la
+miniature » est active dans FreeCAD) — aucun document n'est ouvert pour
+construire l'aperçu.
+
+Code couleur : l'icône est VERTE (local), par opposition au jaune de
+l'explorer serveur.
+"""
+
+import os
+import zipfile
+import FreeCAD as App
+import FreeCADGui as Gui
+from PySide6 import QtWidgets, QtCore, QtGui
+
+
+# ======================================================================
+#  DIMENSIONS — volontairement plus PETITES que PiStock Explorer
+# ======================================================================
+THUMB = 72          # côté de la mini-vignette (explorer serveur : 160x110)
+CARD_W = 88
+CARD_H = 104
+INDENT_PX = 22      # décalage horizontal par niveau d'arborescence
+STRIP_H = CARD_H + 26   # hauteur de la bande (carte + barre de défilement)
+
+
+# ======================================================================
+#  I18N — petit squelette (EN source, FR), comme PiStock Explorer
+# ======================================================================
+PISTOCK_PARAM_PATH = "User parameter:BaseApp/Preferences/Mod/PiStock"
+PARAM_DIR_KEY = "LocalMasterDir"
+
+TRANSLATIONS = {
+    "en": {},  # langue source — clé == valeur
+    "fr": {
+        "PiStock Local Explorer": "PiStock Explorer Local",
+        "Language:": "Langue :",
+        "Master folder:": "Dossier master :",
+        "Browse…": "Parcourir…",
+        "Scan": "Scanner",
+        "Choose the master folder to explore":
+            "Choisir le dossier master à explorer",
+        "Enter a master folder above, then click « Scan ».":
+            "Entrez un dossier master ci-dessus, puis cliquez sur « Scanner ».",
+        "Folder not found: {path}": "Dossier introuvable : {path}",
+        "No FreeCAD (.FCStd) file found under this folder.":
+            "Aucun fichier FreeCAD (.FCStd) trouvé sous ce dossier.",
+        "{n} file(s) in {d} folder(s)": "{n} fichier(s) dans {d} dossier(s)",
+        "Scanning…": "Analyse…",
+        "(no thumbnail)": "(pas de vignette)",
+        "Click to open « {name} »": "Cliquer pour ouvrir « {name} »",
+        "PiStock — Error": "PiStock — Erreur",
+        "Cannot open « {name} » :\n{err}":
+            "Impossible d'ouvrir « {name} » :\n{err}",
+        "(master)": "(master)",
+    },
+}
+
+
+def get_lang():
+    try:
+        params = App.ParamGet(PISTOCK_PARAM_PATH)
+        lang = params.GetString("Language", "en")
+        return lang if lang in TRANSLATIONS else "en"
+    except Exception:
+        return "en"
+
+
+def set_lang(lang):
+    if lang not in TRANSLATIONS:
+        return
+    try:
+        App.ParamGet(PISTOCK_PARAM_PATH).SetString("Language", lang)
+    except Exception:
+        pass
+
+
+def tr(text):
+    return TRANSLATIONS.get(get_lang(), {}).get(text, text)
+
+
+def get_saved_dir():
+    try:
+        return App.ParamGet(PISTOCK_PARAM_PATH).GetString(PARAM_DIR_KEY, "")
+    except Exception:
+        return ""
+
+
+def set_saved_dir(path):
+    try:
+        App.ParamGet(PISTOCK_PARAM_PATH).SetString(PARAM_DIR_KEY, path or "")
+    except Exception:
+        pass
+
+
+# ======================================================================
+#  EXTRACTION DE LA VIGNETTE D'UN .FCStd
+# ======================================================================
+def extract_fcstd_thumbnail(path):
+    """Renvoie les octets PNG de la vignette intégrée au .FCStd, ou None.
+    Un .FCStd est une archive ZIP ; FreeCAD y range l'aperçu sous
+    'thumbnails/Thumbnail.png' quand l'option est active."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            names = set(z.namelist())
+            for cand in ("thumbnails/Thumbnail.png", "Thumbnail.png"):
+                if cand in names:
+                    return z.read(cand)
+    except Exception:
+        pass
+    return None
+
+
+# ======================================================================
+#  CARTE D'UN FICHIER LOCAL
+# ======================================================================
+class LocalFileCard(QtWidgets.QFrame):
+    """Mini-carte d'un fichier .FCStd : vignette + nom. Clic = ouvre le
+    document dans FreeCAD."""
+
+    def __init__(self, path, on_click):
+        super().__init__()
+        self.path = path
+        self.on_click = on_click
+        self.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        self.setFixedSize(CARD_W, CARD_H)
+        self.setCursor(QtCore.Qt.PointingHandCursor)
+        self.setStyleSheet("""
+            LocalFileCard {
+                background: white;
+                border: 1px solid #d2d2d7;
+                border-radius: 6px;
+            }
+            LocalFileCard:hover {
+                border-color: #059669;
+                background: #ecfdf5;
+            }
+        """)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(2)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        self.thumb_label = QtWidgets.QLabel()
+        self.thumb_label.setFixedSize(THUMB, THUMB)
+        self.thumb_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.thumb_label.setStyleSheet(
+            "background: #f5f5f7; border-radius: 4px; color: #c7c7cc;")
+        self.thumb_label.setText("…")
+        layout.addWidget(self.thumb_label, alignment=QtCore.Qt.AlignCenter)
+
+        name = os.path.splitext(os.path.basename(path))[0]
+        name_label = QtWidgets.QLabel(name)
+        name_label.setAlignment(QtCore.Qt.AlignCenter)
+        name_label.setStyleSheet("font-size: 10px;")
+        name_label.setWordWrap(True)
+        layout.addWidget(name_label)
+
+        self.setToolTip(tr("Click to open « {name} »").format(name=name))
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            self.on_click(self.path)
+
+    def set_thumbnail(self, data):
+        pix = QtGui.QPixmap()
+        if data and pix.loadFromData(data) and not pix.isNull():
+            self.thumb_label.setPixmap(pix.scaled(
+                THUMB, THUMB, QtCore.Qt.KeepAspectRatio,
+                QtCore.Qt.SmoothTransformation))
+            self.thumb_label.setText("")
+        else:
+            self.thumb_label.setText(tr("(no thumbnail)"))
+            self.thumb_label.setWordWrap(True)
+
+
+# ======================================================================
+#  WIDGET PRINCIPAL
+# ======================================================================
+class PiStockLocalExplorerWidget(QtWidgets.QWidget):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._build_ui()
+        # Pré-remplit avec le dernier dossier utilisé et scanne si valide.
+        saved = get_saved_dir()
+        if saved:
+            self.path_edit.setText(saved)
+            if os.path.isdir(saved):
+                self.refresh()
+
+    # --- Construction de l'interface --------------------------------
+    def _build_ui(self):
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(14)
+
+        # --- Bandeau titre + langue ----------------------------------
+        title_row = QtWidgets.QHBoxLayout()
+        title = QtWidgets.QLabel("📁 " + tr("PiStock Local Explorer"))
+        title.setStyleSheet("font-size: 18px; font-weight: 600;")
+        title_row.addWidget(title)
+        title_row.addStretch()
+        title_row.addWidget(QtWidgets.QLabel(tr("Language:")))
+        self.lang_combo = QtWidgets.QComboBox()
+        self.lang_combo.addItem("EN", "en")
+        self.lang_combo.addItem("FR", "fr")
+        current = get_lang()
+        for i in range(self.lang_combo.count()):
+            if self.lang_combo.itemData(i) == current:
+                self.lang_combo.setCurrentIndex(i)
+                break
+        self.lang_combo.currentIndexChanged.connect(self._on_lang_change)
+        title_row.addWidget(self.lang_combo)
+        main_layout.addLayout(title_row)
+
+        # --- Barre dossier master : champ + Parcourir + Scanner ------
+        path_row = QtWidgets.QHBoxLayout()
+        path_row.addWidget(QtWidgets.QLabel(tr("Master folder:")))
+        self.path_edit = QtWidgets.QLineEdit()
+        self.path_edit.setPlaceholderText("/home/…")
+        self.path_edit.returnPressed.connect(self.refresh)
+        path_row.addWidget(self.path_edit, 1)
+        browse_btn = QtWidgets.QPushButton(tr("Browse…"))
+        browse_btn.clicked.connect(self._browse)
+        path_row.addWidget(browse_btn)
+        scan_btn = QtWidgets.QPushButton("🔄  " + tr("Scan"))
+        scan_btn.clicked.connect(self.refresh)
+        path_row.addWidget(scan_btn)
+        main_layout.addLayout(path_row)
+
+        # --- Ligne de statut -----------------------------------------
+        self.status_label = QtWidgets.QLabel("")
+        self.status_label.setStyleSheet("color: #6b7280; font-size: 12px;")
+        main_layout.addWidget(self.status_label)
+
+        # --- Zone scrollable : pile verticale des blocs-dossiers -----
+        self.scroll = QtWidgets.QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setStyleSheet("QScrollArea { border: none; }")
+        self.tree_container = QtWidgets.QWidget()
+        self.tree_layout = QtWidgets.QVBoxLayout(self.tree_container)
+        self.tree_layout.setSpacing(10)
+        self.tree_layout.setAlignment(QtCore.Qt.AlignTop)
+        self.scroll.setWidget(self.tree_container)
+        main_layout.addWidget(self.scroll, 1)
+
+    def _on_lang_change(self):
+        new_lang = self.lang_combo.currentData()
+        if not new_lang or new_lang == get_lang():
+            return
+        set_lang(new_lang)
+        # Reconstruction différée (même précaution anti-segfault que
+        # l'explorer serveur : on ne détruit pas le layout pendant le
+        # signal du combo).
+        QtCore.QTimer.singleShot(0, self._rebuild_ui_after_lang_change)
+
+    def _rebuild_ui_after_lang_change(self):
+        saved_text = self.path_edit.text()
+        old_layout = self.layout()
+        if old_layout is not None:
+            QtWidgets.QWidget().setLayout(old_layout)
+        self._build_ui()
+        self.path_edit.setText(saved_text)
+        if saved_text and os.path.isdir(saved_text):
+            self.refresh()
+
+    def _browse(self):
+        start = self.path_edit.text() or os.path.expanduser("~")
+        path = QtWidgets.QFileDialog.getExistingDirectory(
+            self, tr("Choose the master folder to explore"), start)
+        if path:
+            self.path_edit.setText(path)
+            self.refresh()
+
+    # --- Scan + rendu -----------------------------------------------
+    def refresh(self):
+        master = self.path_edit.text().strip()
+        set_saved_dir(master)
+
+        # Vide l'arborescence existante
+        while self.tree_layout.count() > 0:
+            item = self.tree_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+
+        if not master or not os.path.isdir(master):
+            self.status_label.setText("")
+            self._add_message(
+                tr("Folder not found: {path}").format(path=master)
+                if master else
+                tr("Enter a master folder above, then click « Scan »."))
+            return
+
+        self.status_label.setText(tr("Scanning…"))
+        QtWidgets.QApplication.processEvents()
+
+        # 1. Collecte des .FCStd directs par dossier
+        fcstd_by_dir = {}
+        for root, dirs, files in os.walk(master):
+            dirs.sort()
+            fcs = sorted(f for f in files if f.lower().endswith(".fcstd"))
+            if fcs:
+                fcstd_by_dir[root] = [os.path.join(root, f) for f in fcs]
+
+        if not fcstd_by_dir:
+            self.status_label.setText("")
+            self._add_message(
+                tr("No FreeCAD (.FCStd) file found under this folder."))
+            return
+
+        # 2. Dossiers « pertinents » = ceux contenant des .FCStd + tous
+        #    leurs dossiers parents jusqu'au master (pour l'arborescence).
+        relevant = {master}
+        for d in fcstd_by_dir:
+            cur = d
+            while True:
+                relevant.add(cur)
+                if os.path.normpath(cur) == os.path.normpath(master):
+                    break
+                parent = os.path.dirname(cur)
+                if parent == cur:
+                    break
+                cur = parent
+
+        def sort_key(d):
+            rel = os.path.relpath(d, master)
+            return () if rel == "." else tuple(rel.split(os.sep))
+
+        ordered = sorted(relevant, key=sort_key)
+        total = sum(len(v) for v in fcstd_by_dir.values())
+        self.status_label.setText(
+            tr("{n} file(s) in {d} folder(s)").format(
+                n=total, d=len(fcstd_by_dir)))
+
+        # 3. Un bloc par dossier, indenté selon la profondeur.
+        cards = []
+        for d in ordered:
+            depth = len(sort_key(d))
+            files = fcstd_by_dir.get(d, [])
+            block = self._make_folder_block(d, depth, files, cards)
+            self.tree_layout.addWidget(block)
+        self.tree_layout.addStretch()
+
+        # 4. Chargement différé des vignettes (extraction ZIP locale,
+        #    rapide, mais on rend la main à Qt entre chaque pour rester
+        #    fluide sur de grosses arborescences).
+        QtWidgets.QApplication.processEvents()
+        for card in cards:
+            card.set_thumbnail(extract_fcstd_thumbnail(card.path))
+            QtWidgets.QApplication.processEvents()
+
+    def _add_message(self, text):
+        lbl = QtWidgets.QLabel(text)
+        lbl.setAlignment(QtCore.Qt.AlignCenter)
+        lbl.setStyleSheet("color: #6b7280; padding: 40px;")
+        self.tree_layout.addWidget(lbl)
+
+    def _make_folder_block(self, path, depth, files, cards_out):
+        """Bloc d'un dossier : en-tête indenté (nom + chemin relatif +
+        compteur) puis, s'il contient des .FCStd, une bande horizontale
+        scrollable de mini-cartes."""
+        block = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(block)
+        v.setSpacing(4)
+        # Indentation = profondeur dans l'arborescence.
+        v.setContentsMargins(depth * INDENT_PX, 0, 0, 0)
+
+        # --- En-tête du dossier --------------------------------------
+        header = QtWidgets.QHBoxLayout()
+        header.setSpacing(8)
+        is_master = (depth == 0)
+        name = tr("(master)") if is_master else os.path.basename(path)
+        folder_lbl = QtWidgets.QLabel("📁 " + name)
+        folder_lbl.setStyleSheet(
+            "font-weight: 600; font-size: 13px; color: #065f46;")
+        header.addWidget(folder_lbl)
+        if not is_master:
+            rel = os.path.relpath(path, self.path_edit.text().strip())
+            rel_lbl = QtWidgets.QLabel(rel)
+            rel_lbl.setStyleSheet("color: #9ca3af; font-size: 11px;")
+            header.addWidget(rel_lbl)
+        header.addStretch()
+        if files:
+            count_lbl = QtWidgets.QLabel(str(len(files)))
+            count_lbl.setStyleSheet(
+                "color: #6b7280; font-size: 11px; "
+                "background: #ecfdf5; padding: 1px 7px; border-radius: 8px;")
+            header.addWidget(count_lbl)
+        v.addLayout(header)
+
+        # --- Bande horizontale des mini-vignettes --------------------
+        if files:
+            strip = QtWidgets.QScrollArea()
+            strip.setWidgetResizable(True)
+            strip.setFixedHeight(STRIP_H)
+            strip.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+            strip.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+            strip.setStyleSheet("QScrollArea { border: none; }")
+            inner = QtWidgets.QWidget()
+            h = QtWidgets.QHBoxLayout(inner)
+            h.setSpacing(8)
+            h.setContentsMargins(2, 2, 2, 2)
+            h.setAlignment(QtCore.Qt.AlignLeft)
+            for fpath in files:
+                card = LocalFileCard(fpath, self._open_file)
+                h.addWidget(card)
+                cards_out.append(card)
+            h.addStretch()
+            strip.setWidget(inner)
+            v.addWidget(strip)
+
+        return block
+
+    # --- Ouverture d'un fichier -------------------------------------
+    def _open_file(self, path):
+        name = os.path.basename(path)
+        App.Console.PrintMessage(f"📂 Ouverture de {path}…\n")
+        try:
+            App.openDocument(path)
+        except Exception as e:
+            App.Console.PrintError(f"❌ Impossible d'ouvrir '{name}' : {e}\n")
+            QtWidgets.QMessageBox.warning(
+                self, tr("PiStock — Error"),
+                tr("Cannot open « {name} » :\n{err}").format(
+                    name=name, err=str(e)))
+
+
+# ======================================================================
+#  INTEGRATION DANS FreeCAD : sous-fenetre MDI centrale
+# ======================================================================
+def show_pistock_local_explorer():
+    mw = Gui.getMainWindow()
+    if mw is None:
+        App.Console.PrintError("Pas de fenêtre principale FreeCAD.\n")
+        return
+    mdi = mw.findChild(QtWidgets.QMdiArea)
+    if mdi is None:
+        App.Console.PrintError(
+            "Impossible de trouver la zone MDI centrale de FreeCAD.\n")
+        return
+
+    # Reuse : si une instance existe deja, on la rouvre.
+    for sub in mdi.subWindowList():
+        if sub.windowTitle() == "PiStock Local Explorer":
+            sub.show()
+            mdi.setActiveSubWindow(sub)
+            w = sub.widget()
+            if isinstance(w, PiStockLocalExplorerWidget):
+                w.refresh()
+            return
+
+    explorer = PiStockLocalExplorerWidget()
+    sub = QtWidgets.QMdiSubWindow()
+    sub.setWidget(explorer)
+    sub.setWindowTitle("PiStock Local Explorer")
+    sub.setAttribute(QtCore.Qt.WA_DeleteOnClose)
+    mdi.addSubWindow(sub)
+    sub.showMaximized()
+
+
+# Lancement
+show_pistock_local_explorer()

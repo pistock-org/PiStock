@@ -44,6 +44,7 @@ Export a part from FreeCAD and it shows up in the browser within seconds — wit
 
 - ✅ **Web dashboard** with two main views: *Collections* (parts grouped by subject) and *Catalog* (all parts, filterable).
 - ✅ **FreeCAD workbench** — the *PiStock Explorer* and part exporter let you push `.FCStd` files and metadata directly to your server, and pull parts back into a working folder.
+- ✅ **Local explorer (offline)** — a green-iconed workbench tool to browse any local folder tree with a thumbnail per FreeCAD file, no server required (see below).
 - ✅ **Browser 3D viewer** — inspect parts and assemblies in the browser via optimized `.glb` rendering, no CAD software required (great for collaborators who don't run FreeCAD).
 - ✅ **Revision control** — track part versions by revision index.
 - ✅ **Mobile-ready (PWA)** — the web app installs as a Progressive Web App, so you can browse and update your stock from your phone.
@@ -84,6 +85,18 @@ Export a part from FreeCAD and it shows up in the browser within seconds — wit
     <td align="center"><a href="https://github.com/pistock-org/PiStock/raw/main/docs/images/plugins.png"><img src="https://github.com/pistock-org/PiStock/raw/main/docs/images/plugins.png" alt="Plugins"></a><br><sub>Plugins</sub></td>
   </tr>
 </table>
+
+---
+
+## 🟢 Local explorer (offline)
+
+The **Local Explorer** is a FreeCAD workbench tool that browses a local *master* folder and **all its subfolders** — no server, fully offline. It lays the folders out as an expanded tree, and under each one stacks a small thumbnail per `.FCStd` file, read straight from the file. Click a thumbnail to open the document in FreeCAD.
+
+Its **green** icon marks it as the offline counterpart to the server-backed *PiStock Explorer* (yellow). It's handy for triaging an existing CAD library — see what you already have at a glance — before importing parts into PiStock.
+
+![PiStock Local Explorer](https://github.com/pistock-org/PiStock/raw/main/docs/images/local-explorer.png)
+
+> 💡 Thumbnails come from each `.FCStd` directly, so enable **Preferences → General → Document → "Save thumbnail with document"** in FreeCAD to get them on new saves.
 
 ---
 

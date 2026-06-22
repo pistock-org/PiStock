@@ -1,6 +1,6 @@
 # PiStock — FreeCAD workbench
 
-A FreeCAD workbench that wraps the three PiStock macros into a toolbar +
+A FreeCAD workbench that wraps the PiStock macros into a toolbar +
 menu, so there is nothing to wire up by hand. It uses the standard
 namespace-package layout (like the FreeCAD workbench starter kit):
 
@@ -11,7 +11,7 @@ pistock-freecad/
     └── pistock_workbench/
         ├── init_gui.py            ← registers the workbench
         ├── __init__.py
-        ├── pistock_*.FCMacro      ← the 3 macros
+        ├── pistock_*.FCMacro      ← the PiStock macros
         ├── pistock_host.txt(.example)   ← server address (filled at deploy)
         ├── pistock_ca.pem         ← local root CA (added at deploy)
         └── resources/icons/*.svg
@@ -21,6 +21,7 @@ pistock-freecad/
 |---------|--------------|
 | **Export part** | Send the active part (CAD + thumbnail + 3D) to PiStock |
 | **Browse catalog** | Browse and open parts stored in PiStock |
+| **Browse local folder** | Explore a local master folder and its subfolders, with a small thumbnail per FreeCAD file (green = local, no server) |
 | **BOM from assembly** | Build a PiStock BOM from the active assembly |
 
 ## Install (USB-stick friendly)

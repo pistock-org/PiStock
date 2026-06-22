@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" fill="#292524" rx="10"/>
+  <!-- Dossier LOCAL : vert (par opposition au jaune de l'explorer serveur) -->
+  <path d="M8 20 h13 l4 5 h31 v27 a3 3 0 0 1 -3 3 H11 a3 3 0 0 1 -3 -3 Z"
+        fill="none" stroke="#34d399" stroke-width="3" stroke-linejoin="round"/>
+  <!-- Mini-vignettes empilées horizontalement (rappel de l'affichage) -->
+  <rect x="14" y="34" width="11" height="13" rx="1.5"
+        fill="none" stroke="#34d399" stroke-width="2.5"/>
+  <rect x="27" y="34" width="11" height="13" rx="1.5"
+        fill="none" stroke="#34d399" stroke-width="2.5"/>
+  <rect x="40" y="34" width="11" height="13" rx="1.5"
+        fill="none" stroke="#34d399" stroke-width="2.5"/>
+</svg>
