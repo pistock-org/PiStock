@@ -265,7 +265,12 @@ def register(app):
                           on_click=lambda: ui.navigate.to("/catalog")) \
                     .props("flat color=white").classes("text-sm")
 
-        state = {"board": _boards()[0]}
+        # 'extra' tracks boards created in this session that have no note
+        # yet — boards live only through the notes' `board` column, so an
+        # empty board is invisible to _boards() (which reads the DB) until
+        # its first note. We keep it here so it stays selectable and a
+        # valid move target meanwhile.
+        state = {"board": _boards()[0], "extra": set()}
 
         with ui.column().classes("max-w-6xl mx-auto p-4 w-full gap-3"):
             with ui.row().classes("w-full items-end gap-2 flex-wrap"):
@@ -284,6 +289,23 @@ def register(app):
                     .props("color=primary")
 
             grid = ui.column().classes("w-full")
+
+            def board_options():
+                """All selectable boards: those in the DB + session-created
+                empty ones. Used by both the board selector and the note
+                editor's move-to-board field."""
+                return sorted(set(_boards()) | state["extra"])
+
+            def _on_board_change():
+                # A value typed into the selector (new_value_mode) creates a
+                # board with no note yet: remember it so it stays listed and
+                # can host the first note / receive moved notes.
+                v = board_sel.value
+                if v and v not in _boards():
+                    state["extra"].add(v)
+                board_sel.options = board_options()
+                board_sel.update()
+                render()
 
             def render():
                 board = board_sel.value or state["board"]
@@ -410,7 +432,7 @@ def register(app):
                     # Board selector: changing it MOVES the note to another
                     # board (or to a brand-new one via add-unique).
                     board_in = ui.select(
-                        options=_boards(),
+                        options=board_options(),
                         value=(existing["board"] if existing
                                else (board_sel.value or state["board"])),
                         label=_tr("board"), with_input=True,
@@ -456,9 +478,14 @@ def register(app):
                                   title_in.value, note_in.value, tags_in.value,
                                   pending["images"],
                                   note_id=existing["id"] if existing else None)
+                            # the chosen board now has a note: keep it in
+                            # the session set too (harmless once in the DB).
+                            chosen = (board_in.value or board_sel.value
+                                      or state["board"])
+                            if chosen:
+                                state["extra"].add(chosen)
                             dlg.close()
-                            # a brand-new board may now exist
-                            board_sel.options = _boards()
+                            board_sel.options = board_options()
                             board_sel.update()
                             render()
                         ui.button(_tr("save"), on_click=save).props("color=primary")
@@ -473,9 +500,12 @@ def register(app):
 
                     def do():
                         new = _rename_board(old, name_in.value)
+                        state["extra"].discard(old)
+                        if new:
+                            state["extra"].add(new)
                         dlg.close()
-                        board_sel.options = _boards()
                         board_sel.value = new
+                        board_sel.options = board_options()
                         board_sel.update()
                         state["board"] = new
                         render()
@@ -486,6 +516,6 @@ def register(app):
                             .props("color=primary")
                 dlg.open()
 
-            board_sel.on_value_change(lambda: render())
+            board_sel.on_value_change(lambda: _on_board_change())
             search_in.on_value_change(lambda: render())
             render()
