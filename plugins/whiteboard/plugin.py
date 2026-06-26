@@ -81,6 +81,9 @@ T = {
         "remove_image": "Remove",
         "save": "Save", "cancel": "Cancel", "delete": "Delete", "edit": "Edit",
         "confirm_delete": "Delete this note?",
+        "rename_board": "Rename board", "board_name": "Board name",
+        "rename": "Rename",
+        "move_note_hint": "Change the board to move this note to another one.",
         "default_board": "General",
     },
     "fr": {
@@ -94,6 +97,9 @@ T = {
         "remove_image": "Retirer",
         "save": "Enregistrer", "cancel": "Annuler", "delete": "Supprimer", "edit": "Éditer",
         "confirm_delete": "Supprimer cette note ?",
+        "rename_board": "Renommer le tableau", "board_name": "Nom du tableau",
+        "rename": "Renommer",
+        "move_note_hint": "Changez le tableau pour déplacer cette note vers un autre.",
         "default_board": "Général",
     },
     "de": {
@@ -107,6 +113,9 @@ T = {
         "remove_image": "Entfernen",
         "save": "Speichern", "cancel": "Abbrechen", "delete": "Löschen", "edit": "Bearbeiten",
         "confirm_delete": "Diese Notiz löschen?",
+        "rename_board": "Tafel umbenennen", "board_name": "Tafelname",
+        "rename": "Umbenennen",
+        "move_note_hint": "Tafel ändern, um diese Notiz zu verschieben.",
         "default_board": "Allgemein",
     },
 }
@@ -151,7 +160,7 @@ def _fetch(board, query=""):
                 if term not in hay:
                     continue
             out.append({"id": r.id, "title": r.title, "note": r.note,
-                        "hashtags": r.hashtags,
+                        "hashtags": r.hashtags, "board": r.board,
                         "images": _parse_images(r.image_path)})
         return out
 
@@ -182,6 +191,27 @@ def _delete(note_id):
         if row is not None:
             s.delete(row)
             s.commit()
+
+
+def _rename_board(old, new):
+    """Rename a board by moving every one of its notes to `new`. Boards
+    have no table of their own — they only exist through the `board`
+    column — so a rename is a bulk update of that column. If `new`
+    already names another board, the two boards merge (notes are pooled).
+    Returns the effective board name to select. We do NOT bump
+    updated_at, to preserve each note's ordering."""
+    import main
+    new = (new or "").strip()
+    if not new or new == old:
+        return old or new
+    with Session(main.engine) as s:
+        rows = s.exec(
+            select(WhiteboardPostit).where(WhiteboardPostit.board == old)
+        ).all()
+        for r in rows:
+            r.board = new
+        s.commit()
+    return new
 
 
 def _img_dir():
@@ -243,6 +273,9 @@ def register(app):
                     options=_boards(), value=state["board"],
                     label=_tr("board"), with_input=True,
                     new_value_mode="add-unique").classes("min-w-[160px]")
+                ui.button(icon="drive_file_rename_outline",
+                          on_click=lambda: _open_rename_board()) \
+                    .props("flat round dense").tooltip(_tr("rename_board"))
                 search_in = ui.input(label=_tr("search")) \
                     .props("clearable dense").classes("min-w-[220px] flex-grow")
                 ui.element("div").classes("flex-grow")
@@ -374,6 +407,17 @@ def register(app):
                                        value=existing["hashtags"] if existing else "") \
                         .classes("w-full")
 
+                    # Board selector: changing it MOVES the note to another
+                    # board (or to a brand-new one via add-unique).
+                    board_in = ui.select(
+                        options=_boards(),
+                        value=(existing["board"] if existing
+                               else (board_sel.value or state["board"])),
+                        label=_tr("board"), with_input=True,
+                        new_value_mode="add-unique").classes("w-full")
+                    ui.label(_tr("move_note_hint")) \
+                        .classes("text-xs text-gray-500")
+
                     img_box = ui.row().classes("items-start gap-2 flex-wrap")
 
                     def render_img():
@@ -407,7 +451,8 @@ def register(app):
                         ui.button(_tr("cancel"), on_click=dlg.close).props("flat")
 
                         def save():
-                            _save(board_sel.value or state["board"],
+                            _save(board_in.value or board_sel.value
+                                  or state["board"],
                                   title_in.value, note_in.value, tags_in.value,
                                   pending["images"],
                                   note_id=existing["id"] if existing else None)
@@ -417,6 +462,28 @@ def register(app):
                             board_sel.update()
                             render()
                         ui.button(_tr("save"), on_click=save).props("color=primary")
+                dlg.open()
+
+            def _open_rename_board():
+                old = board_sel.value or state["board"]
+                with ui.dialog() as dlg, ui.card().classes("min-w-[360px] gap-2"):
+                    ui.label(_tr("rename_board")).classes("text-lg font-medium")
+                    name_in = ui.input(_tr("board_name"), value=old) \
+                        .classes("w-full")
+
+                    def do():
+                        new = _rename_board(old, name_in.value)
+                        dlg.close()
+                        board_sel.options = _boards()
+                        board_sel.value = new
+                        board_sel.update()
+                        state["board"] = new
+                        render()
+                    name_in.on("keydown.enter", lambda: do())
+                    with ui.row().classes("w-full justify-end gap-2 mt-2"):
+                        ui.button(_tr("cancel"), on_click=dlg.close).props("flat")
+                        ui.button(_tr("rename"), on_click=do) \
+                            .props("color=primary")
                 dlg.open()
 
             board_sel.on_value_change(lambda: render())
