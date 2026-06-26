@@ -34,11 +34,40 @@ class WhiteboardPostit(SQLModel, table=True):
     image_path: str | None = Field(default=None)
     created_at: str = Field(default="")
     updated_at: str = Field(default="")
+    # Manual ordering within a board (drag & drop). Lower = higher up.
+    position: int = Field(default=0, index=True)
+    # Optional per-note styling. color = palette key ("" = default
+    # yellow). width/height = manual size in px (0 = auto, with a
+    # readability cap on the body).
+    color: str = Field(default="")
+    width: int = Field(default=0)
+    height: int = Field(default=0)
 
 
 def _ensure_table():
     import main
     WhiteboardPostit.__table__.create(main.engine, checkfirst=True)
+    # Additive migration: add any column missing on an older table
+    # (create(checkfirst) never alters an existing table). Keeps the
+    # plugin self-sufficient on databases predating these columns.
+    raw = main.engine.raw_connection()
+    try:
+        cur = raw.cursor()
+        cur.execute('PRAGMA table_info("plugin_whiteboard_postit")')
+        existing = {r[1] for r in cur.fetchall()}
+        for col, ddl in (
+            ("position", "INTEGER DEFAULT 0"),
+            ("color", "VARCHAR DEFAULT ''"),
+            ("width", "INTEGER DEFAULT 0"),
+            ("height", "INTEGER DEFAULT 0"),
+        ):
+            if col not in existing:
+                cur.execute(
+                    f'ALTER TABLE "plugin_whiteboard_postit" '
+                    f'ADD COLUMN "{col}" {ddl}')
+        raw.commit()
+    finally:
+        raw.close()
 
 
 def _now():
@@ -84,6 +113,7 @@ T = {
         "rename_board": "Rename board", "board_name": "Board name",
         "rename": "Rename",
         "move_note_hint": "Change the board to move this note to another one.",
+        "reset_size": "Reset size", "drag_hint": "Drag to reorder",
         "default_board": "General",
     },
     "fr": {
@@ -100,6 +130,7 @@ T = {
         "rename_board": "Renommer le tableau", "board_name": "Nom du tableau",
         "rename": "Renommer",
         "move_note_hint": "Changez le tableau pour déplacer cette note vers un autre.",
+        "reset_size": "Réinitialiser la taille", "drag_hint": "Glisser pour réordonner",
         "default_board": "Général",
     },
     "de": {
@@ -116,6 +147,7 @@ T = {
         "rename_board": "Tafel umbenennen", "board_name": "Tafelname",
         "rename": "Umbenennen",
         "move_note_hint": "Tafel ändern, um diese Notiz zu verschieben.",
+        "reset_size": "Größe zurücksetzen", "drag_hint": "Zum Umsortieren ziehen",
         "default_board": "Allgemein",
     },
 }
@@ -151,7 +183,8 @@ def _fetch(board, query=""):
         rows = s.exec(
             select(WhiteboardPostit)
             .where(WhiteboardPostit.board == board)
-            .order_by(WhiteboardPostit.updated_at.desc())
+            .order_by(WhiteboardPostit.position.asc(),
+                      WhiteboardPostit.updated_at.desc())
         ).all()
         out = []
         for r in rows:
@@ -161,12 +194,15 @@ def _fetch(board, query=""):
                     continue
             out.append({"id": r.id, "title": r.title, "note": r.note,
                         "hashtags": r.hashtags, "board": r.board,
-                        "images": _parse_images(r.image_path)})
+                        "images": _parse_images(r.image_path),
+                        "color": r.color or "",
+                        "width": r.width or 0, "height": r.height or 0})
         return out
 
 
 def _save(board, title, note, hashtags, images, note_id=None):
     import main
+    bd = board or _tr("default_board")
     with Session(main.engine) as s:
         if note_id is not None:
             row = s.get(WhiteboardPostit, note_id)
@@ -174,8 +210,15 @@ def _save(board, title, note, hashtags, images, note_id=None):
                 return
         else:
             row = WhiteboardPostit(created_at=_now())
+            # New notes go to the TOP of their board (smallest position).
+            top = s.exec(
+                select(WhiteboardPostit.position)
+                .where(WhiteboardPostit.board == bd)
+                .order_by(WhiteboardPostit.position.asc())
+            ).first()
+            row.position = (top - 1) if top is not None else 0
             s.add(row)
-        row.board = board or _tr("default_board")
+        row.board = bd
         row.title = (title or "").strip()
         row.note = (note or "").strip()
         row.hashtags = (hashtags or "").strip()
@@ -214,6 +257,32 @@ def _rename_board(old, new):
     return new
 
 
+def _update_fields(note_id, **fields):
+    """Update arbitrary scalar fields of a note (color, width, height…)."""
+    import main
+    allowed = {"color", "width", "height", "position"}
+    with Session(main.engine) as s:
+        row = s.get(WhiteboardPostit, note_id)
+        if row is None:
+            return
+        for k, v in fields.items():
+            if k in allowed:
+                setattr(row, k, v)
+        s.commit()
+
+
+def _reorder(board, ids):
+    """Persist a drag & drop reorder: assign position = index for each
+    note id, in the given order. Ignores ids not in this board."""
+    import main
+    with Session(main.engine) as s:
+        for i, nid in enumerate(ids):
+            row = s.get(WhiteboardPostit, nid)
+            if row is not None and row.board == board:
+                row.position = i
+        s.commit()
+
+
 def _img_dir():
     import main
     d = os.path.join(main.DATA_DIR, "uploads", "whiteboard")
@@ -244,6 +313,76 @@ def _hashtag_chips(text):
     return out
 
 
+# ----------------------------------------------------------------------
+#  Colour palette (key stored in the `color` column; "" = default)
+# ----------------------------------------------------------------------
+COLORS = {
+    "":       {"card": "bg-yellow-50 border-yellow-200",
+               "chip": "bg-yellow-200 text-yellow-900", "sw": "bg-yellow-300"},
+    "amber":  {"card": "bg-amber-50 border-amber-300",
+               "chip": "bg-amber-200 text-amber-900", "sw": "bg-amber-400"},
+    "green":  {"card": "bg-green-50 border-green-300",
+               "chip": "bg-green-200 text-green-900", "sw": "bg-green-400"},
+    "blue":   {"card": "bg-sky-50 border-sky-300",
+               "chip": "bg-sky-200 text-sky-900", "sw": "bg-sky-400"},
+    "pink":   {"card": "bg-pink-50 border-pink-300",
+               "chip": "bg-pink-200 text-pink-900", "sw": "bg-pink-400"},
+    "purple": {"card": "bg-purple-50 border-purple-300",
+               "chip": "bg-purple-200 text-purple-900", "sw": "bg-purple-400"},
+    "gray":   {"card": "bg-stone-100 border-stone-300",
+               "chip": "bg-stone-200 text-stone-800", "sw": "bg-stone-400"},
+}
+
+
+# JavaScript wired after each render: (re)initialise SortableJS drag &
+# drop on the board and a ResizeObserver per card to persist manual
+# resizes. Talks back to Python via emitEvent('wb_reorder' / 'wb_resize').
+_WB_JS = """
+(function(){
+  function emit(n,d){ if(window.emitEvent) window.emitEvent(n,d); }
+  function initSortable(){
+    var el = document.getElementById('wb-board');
+    if(!el) return;
+    if(typeof Sortable === 'undefined'){ return setTimeout(initSortable, 200); }
+    if(el._sortable){ try{ el._sortable.destroy(); }catch(e){} }
+    el._sortable = Sortable.create(el, {
+      animation: 150, draggable: '.wb-note', handle: '.wb-drag',
+      ghostClass: 'opacity-50',
+      onEnd: function(){
+        var ids = Array.prototype.slice.call(el.children)
+          .map(function(c){ return c.getAttribute('data-nid'); })
+          .filter(function(x){ return x; });
+        emit('wb_reorder', {ids: ids});
+      }
+    });
+  }
+  function initResize(){
+    // Persist a size only when a POINTER drag actually changed it — this
+    // ignores layout-driven reflows (image load, etc.) that a naive
+    // ResizeObserver would mistake for a user resize.
+    document.querySelectorAll('#wb-board .wb-note .wb-card').forEach(function(card){
+      if(card._wbsz) return; card._wbsz = true;
+      var note = card.closest('.wb-note');
+      var nid = note ? note.getAttribute('data-nid') : null;
+      if(!nid) return;
+      card.addEventListener('pointerdown', function(){
+        card._wbdown = {w: card.offsetWidth, h: card.offsetHeight};
+      });
+      window.addEventListener('pointerup', function(){
+        var d = card._wbdown; card._wbdown = null;
+        if(!d) return;
+        var w = card.offsetWidth, h = card.offsetHeight;
+        if(Math.abs(w - d.w) > 2 || Math.abs(h - d.h) > 2){
+          emit('wb_resize', {id: nid, w: Math.round(w), h: Math.round(h)});
+        }
+      });
+    });
+  }
+  initSortable(); initResize();
+})();
+"""
+
+
 # ======================================================================
 #  PAGE
 # ======================================================================
@@ -254,6 +393,14 @@ def register(app):
 
     @ui.page("/plugin/whiteboard")
     def whiteboard_page():
+        # SortableJS (drag & drop). Loaded locally for offline use, with a
+        # CDN fallback — same pattern as the 3D model-viewer.
+        ui.add_head_html(
+            '<script src="/static/sortable.min.js" '
+            'onerror="this.onerror=null;var s=document.createElement(\'script\');'
+            "s.src='https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js';"
+            'document.head.appendChild(s);"></script>')
+
         with ui.header().classes("bg-stone-800 text-white shadow"):
             with ui.row().classes("w-full items-center gap-3"):
                 ui.label("📌 " + _tr("title")).classes("text-xl font-medium")
@@ -317,49 +464,107 @@ def register(app):
                         msg = _tr("no_match") if (search_in.value or "").strip() \
                             else _tr("empty")
                         ui.label(msg).classes("text-gray-500 italic p-6")
-                        return
-                    with ui.row().classes("w-full gap-3 items-start flex-wrap"):
-                        for n in notes:
-                            _render_note(n)
+                    else:
+                        # Plain div container so SortableJS can reorder the
+                        # .wb-note children; each carries its note id.
+                        with ui.element("div").props("id=wb-board").classes(
+                                "flex flex-wrap gap-3 items-start w-full"):
+                            for n in notes:
+                                _render_note(n)
+                # (Re)initialise drag & drop + resize observers on the new
+                # DOM. Harmless when the board is empty.
+                ui.run_javascript(_WB_JS)
+
+            def _set_color(nid, color):
+                _update_fields(nid, color=color)
+                render()
+
+            def _reset_size(nid):
+                _update_fields(nid, width=0, height=0)
+                render()
 
             def _render_note(n):
-                with ui.card().classes(
-                        "w-64 p-3 gap-1 bg-yellow-50 border border-yellow-200 "
-                        "shadow-sm"):
-                    with ui.row().classes("w-full items-start no-wrap gap-1"):
-                        ui.label(n["title"] or "—") \
-                            .classes("font-bold text-base flex-grow break-words")
-                        ui.button(icon="edit",
-                                  on_click=lambda nn=n: _open_editor(nn)) \
-                            .props("flat round dense size=sm")
-                        ui.button(icon="delete",
-                                  on_click=lambda nn=n: _confirm_delete(nn)) \
-                            .props("flat round dense size=sm color=negative")
-                    imgs = n["images"]
-                    if len(imgs) == 1:
-                        ui.image("/" + imgs[0]) \
-                            .classes("w-full rounded max-h-48 object-contain "
-                                     "bg-white cursor-pointer") \
-                            .on("click", lambda p=imgs[0]: _open_image(p))
-                    elif imgs:
-                        with ui.row().classes("w-full gap-1 flex-wrap"):
-                            for p in imgs:
-                                ui.image("/" + p) \
-                                    .classes("w-[72px] h-[72px] object-cover rounded "
-                                             "bg-white cursor-pointer") \
-                                    .on("click", lambda pp=p: _open_image(pp))
-                    if n["note"]:
-                        ui.label(n["note"]) \
-                            .classes("text-sm whitespace-pre-wrap break-words")
-                    chips = _hashtag_chips(n["hashtags"])
-                    if chips:
-                        with ui.row().classes("gap-1 flex-wrap"):
-                            for c in chips:
-                                ui.label(c).classes(
-                                    "text-xs bg-yellow-200 text-yellow-900 "
-                                    "px-1.5 rounded cursor-pointer") \
-                                    .on("click",
-                                        lambda t=c: (search_in.set_value(t), render()))
+                nid = n["id"]
+                col = COLORS.get(n.get("color") or "", COLORS[""])
+                w = n.get("width") or 0
+                h = n.get("height") or 0
+                # Wrapper carries the note id for SortableJS reorder.
+                with ui.element("div").props(f"data-nid={nid}").classes("wb-note"):
+                    card = ui.card().classes(
+                        f"wb-card p-3 gap-1 shadow-sm border flex flex-col "
+                        f"{col['card']}")
+                    # Free resize via the corner handle (CSS resize). Manual
+                    # width/height (px) are restored here; otherwise a sane
+                    # default width and auto height.
+                    style = ("resize: both; overflow: hidden; "
+                             "min-width: 12rem; min-height: 7rem; ")
+                    style += f"width: {w}px; " if w else "width: 16rem; "
+                    if h:
+                        style += f"height: {h}px; "
+                    card.style(style)
+                    with card:
+                        with ui.row().classes("w-full items-center no-wrap gap-1"):
+                            ui.icon("drag_indicator") \
+                                .classes("wb-drag cursor-move text-gray-400") \
+                                .tooltip(_tr("drag_hint"))
+                            ui.label(n["title"] or "—") \
+                                .classes("font-bold text-base flex-grow break-words")
+                            # "…" options : colour swatches + reset size
+                            with ui.button(icon="more_horiz") \
+                                    .props("flat round dense size=sm"):
+                                with ui.menu() as menu:
+                                    with ui.row().classes("p-2 gap-1 items-center"):
+                                        for key, c in COLORS.items():
+                                            ui.element("div").classes(
+                                                f"w-5 h-5 rounded-full cursor-pointer "
+                                                f"border border-gray-300 {c['sw']}") \
+                                                .on("click",
+                                                    lambda k=key, i=nid:
+                                                    (_set_color(i, k), menu.close()))
+                                    ui.menu_item(
+                                        _tr("reset_size"),
+                                        on_click=lambda i=nid: _reset_size(i))
+                            ui.button(icon="edit",
+                                      on_click=lambda nn=n: _open_editor(nn)) \
+                                .props("flat round dense size=sm")
+                            ui.button(icon="delete",
+                                      on_click=lambda nn=n: _confirm_delete(nn)) \
+                                .props("flat round dense size=sm color=negative")
+                        imgs = n["images"]
+                        if len(imgs) == 1:
+                            ui.image("/" + imgs[0]) \
+                                .classes("w-full rounded max-h-48 object-contain "
+                                         "bg-white cursor-pointer") \
+                                .on("click", lambda p=imgs[0]: _open_image(p))
+                        elif imgs:
+                            with ui.row().classes("w-full gap-1 flex-wrap"):
+                                for p in imgs:
+                                    ui.image("/" + p) \
+                                        .classes("w-[72px] h-[72px] object-cover "
+                                                 "rounded bg-white cursor-pointer") \
+                                        .on("click", lambda pp=p: _open_image(pp))
+                        if n["note"]:
+                            # Readability cap on the body; if a manual height
+                            # is set, let the body fill the resized card.
+                            body = ui.element("div").classes(
+                                "w-full overflow-auto break-words")
+                            if h:
+                                body.classes("flex-grow")
+                            else:
+                                body.style("max-height: 16rem")
+                            with body:
+                                ui.label(n["note"]).classes(
+                                    "text-sm whitespace-pre-wrap break-words")
+                        chips = _hashtag_chips(n["hashtags"])
+                        if chips:
+                            with ui.row().classes("gap-1 flex-wrap"):
+                                for c in chips:
+                                    ui.label(c).classes(
+                                        f"text-xs {col['chip']} px-1.5 rounded "
+                                        f"cursor-pointer") \
+                                        .on("click",
+                                            lambda t=c: (search_in.set_value(t),
+                                                         render()))
 
             def _open_image(rel):
                 zoom = {"k": 1.0}
@@ -515,6 +720,30 @@ def register(app):
                         ui.button(_tr("rename"), on_click=do) \
                             .props("color=primary")
                 dlg.open()
+
+            def _on_reorder(e):
+                ids = []
+                for x in (e.args or {}).get("ids", []):
+                    try:
+                        ids.append(int(x))
+                    except (TypeError, ValueError):
+                        pass
+                if ids:
+                    _reorder(state["board"], ids)
+                    render()  # sync server order + re-init drag/resize
+
+            def _on_resize(e):
+                a = e.args or {}
+                try:
+                    nid = int(a.get("id"))
+                except (TypeError, ValueError):
+                    return
+                _update_fields(nid, width=int(a.get("w") or 0),
+                               height=int(a.get("h") or 0))
+                # No re-render here: it would interrupt the live resize.
+
+            ui.on("wb_reorder", _on_reorder)
+            ui.on("wb_resize", _on_resize)
 
             board_sel.on_value_change(lambda: _on_board_change())
             search_in.on_value_change(lambda: render())
