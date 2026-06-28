@@ -22,6 +22,7 @@ pistock-freecad/
 | **Export part** | Send the active part (CAD + thumbnail + 3D) to PiStock |
 | **Browse catalog** | Browse and open parts stored in PiStock |
 | **Browse local folder** | Explore a local master folder and its subfolders, with a small thumbnail per FreeCAD file (green = local, no server) |
+| **Generate thumbnails** | Batch-generate missing thumbnails for every `.FCStd` under a local folder — open, fit view, save, close (green = local, no server) |
 | **BOM from assembly** | Build a PiStock BOM from the active assembly |
 
 ## Install (USB-stick friendly)

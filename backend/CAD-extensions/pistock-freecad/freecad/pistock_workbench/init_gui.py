@@ -68,6 +68,11 @@ Gui.addCommand("PiStock_LocalExplorer", _PiStockCommand(
     "Browse local folder",
     "Explore a local master folder and its subfolders, with a small "
     "thumbnail per FreeCAD file"))
+Gui.addCommand("PiStock_ThumbnailGenerator", _PiStockCommand(
+    "pistock_thumbnail_generator.FCMacro", "pistock_thumbnail_generator.svg",
+    "Generate thumbnails",
+    "Batch-generate missing thumbnails for every FreeCAD file under a "
+    "local master folder (open, fit view, save, close)"))
 Gui.addCommand("PiStock_BomFromAssembly", _PiStockCommand(
     "pistock_bom_from_assembly.FCMacro", "pistock_bom_from_assembly.svg",
     "BOM from assembly", "Create a PiStock BOM from the active assembly"))
@@ -79,7 +84,7 @@ Gui.addCommand("PiStock_WrapBodies", _PiStockCommand(
 
 _COMMANDS = ["PiStock_WrapBodies", "PiStock_Export",
              "PiStock_Explorer", "PiStock_LocalExplorer",
-             "PiStock_BomFromAssembly"]
+             "PiStock_ThumbnailGenerator", "PiStock_BomFromAssembly"]
 
 
 class PiStockWorkbench(Gui.Workbench):

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" fill="#292524" rx="10"/>
+  <!-- Fonction LOCALE : vert (comme le Local Explorer) -->
+  <!-- Cadre image -->
+  <rect x="9" y="11" width="46" height="34" rx="4"
+        fill="none" stroke="#34d399" stroke-width="3"/>
+  <!-- Soleil -->
+  <circle cx="20" cy="22" r="4" fill="#34d399"/>
+  <!-- Montagne (la "vignette") -->
+  <path d="M12 44 L25 28 L33 37 L41 30 L52 44 Z"
+        fill="none" stroke="#34d399" stroke-width="3" stroke-linejoin="round"/>
+  <!-- Étincelle : symbolise la génération -->
+  <path d="M52 47 l1.6 4.4 l4.4 1.6 l-4.4 1.6 l-1.6 4.4 l-1.6 -4.4 l-4.4 -1.6 l4.4 -1.6 Z"
+        fill="#34d399"/>
+</svg>

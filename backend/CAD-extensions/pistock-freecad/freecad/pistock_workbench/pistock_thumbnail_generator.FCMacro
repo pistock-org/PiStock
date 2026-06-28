@@ -1,0 +1,544 @@
+# PiStock — PLM/inventory tool for FreeCAD-based workshops
+# Copyright (C) 2026 GA3Dtech
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""
+PiStock Thumbnail Generator — génère les miniatures manquantes en masse.
+
+À partir d'un dossier « master », la macro parcourt toute l'arborescence,
+et pour chaque fichier FreeCAD (.FCStd) :
+
+    1. l'ouvre dans FreeCAD ;
+    2. applique « V,F » (Std_ViewFitAll → ajuste la vue pour tout voir) ;
+    3. l'enregistre (ce qui incruste la miniature dans l'archive .FCStd) ;
+    4. le ferme.
+
+But : générer les vignettes pour les fichiers qui n'en ont pas, SANS
+recomputation (aucun appel à recompute()) ni modification du modèle.
+
+NOTES IMPORTANTES
+-----------------
+• La miniature n'est écrite à la sauvegarde QUE si la préférence
+  « Enregistrer la miniature » est active. La macro l'active au démarrage
+  et restaure sa valeur d'origine à la fin.
+• « Ajuster la vue (V,F) » modifie la caméra enregistrée dans le fichier.
+  Si l'option est décochée, on garde la caméra telle quelle : seule la
+  miniature est ajoutée, rien d'autre ne change.
+• PROCESSUS INTERRUPTIBLE : le bouton « Arrêter » stoppe proprement après
+  le fichier en cours. On peut relancer plus tard : avec l'option « Ignorer
+  les fichiers qui ont déjà une miniature » (cochée par défaut), la reprise
+  est automatique.
+• Tout tourne sur le thread principal (les ouvertures de documents GUI
+  l'exigent) ; le traitement est cadencé via un QTimer pour garder
+  l'interface réactive et le bouton « Arrêter » fonctionnel.
+"""
+
+import os
+import zipfile
+import FreeCAD as App
+import FreeCADGui as Gui
+from PySide6 import QtWidgets, QtCore
+
+
+# ======================================================================
+#  PARAMÈTRES PERSISTANTS
+# ======================================================================
+PISTOCK_PARAM_PATH = "User parameter:BaseApp/Preferences/Mod/PiStock"
+PARAM_DIR_KEY = "ThumbMasterDir"
+# Préférence FreeCAD contrôlant l'incrustation de la miniature au save.
+DOC_PARAM_PATH = "User parameter:BaseApp/Preferences/Document"
+SAVE_THUMB_KEY = "SaveThumbnail"
+
+
+# ======================================================================
+#  I18N — squelette EN (source) + FR
+# ======================================================================
+TRANSLATIONS = {
+    "en": {},  # langue source : clé == valeur
+    "fr": {
+        "PiStock Thumbnail Generator": "PiStock — Générateur de miniatures",
+        "Open each FreeCAD file, fit the view (V,F), save (embeds the "
+        "thumbnail), close. Nothing is recomputed.":
+            "Ouvre chaque fichier FreeCAD, ajuste la vue (V,F), enregistre "
+            "(incruste la miniature), ferme. Rien n'est recalculé.",
+        "Language:": "Langue :",
+        "Master folder:": "Dossier master :",
+        "Browse…": "Parcourir…",
+        "Start": "Démarrer",
+        "Stop": "Arrêter",
+        "Choose the master folder": "Choisir le dossier master",
+        "Skip files that already have a thumbnail (resume-friendly)":
+            "Ignorer les fichiers qui ont déjà une miniature (reprise auto)",
+        "Fit all in view (V,F) before saving — changes the saved camera":
+            "Ajuster la vue (V,F) avant l'enregistrement — modifie la caméra "
+            "enregistrée",
+        "Folder not found: {path}": "Dossier introuvable : {path}",
+        "Scanning…": "Analyse de l'arborescence…",
+        "No .FCStd file found under this folder.":
+            "Aucun fichier .FCStd trouvé sous ce dossier.",
+        "Nothing to do — every file already has a thumbnail.":
+            "Rien à faire — tous les fichiers ont déjà une miniature.",
+        "{n} file(s) to process ({skip} already have a thumbnail).":
+            "{n} fichier(s) à traiter ({skip} ont déjà une miniature).",
+        "Processing: {name}": "Traitement : {name}",
+        "Saved but thumbnail still missing: {name}":
+            "Enregistré mais miniature toujours absente : {name}",
+        "Stopped. {done}/{total} processed in this run.":
+            "Arrêté. {done}/{total} traités lors de cette exécution.",
+        "Finished.": "Terminé.",
+        "Summary: {ok} ok, {warn} without thumbnail, {err} error(s), "
+        "{skip} already had one.":
+            "Bilan : {ok} ok, {warn} sans miniature, {err} erreur(s), "
+            "{skip} en avaient déjà une.",
+        "Already open, skipped to avoid closing your document: {name}":
+            "Déjà ouvert, ignoré pour ne pas fermer votre document : {name}",
+    },
+}
+
+
+def get_lang():
+    try:
+        lang = App.ParamGet(PISTOCK_PARAM_PATH).GetString("Language", "en")
+        return lang if lang in TRANSLATIONS else "en"
+    except Exception:
+        return "en"
+
+
+def set_lang(lang):
+    if lang not in TRANSLATIONS:
+        return
+    try:
+        App.ParamGet(PISTOCK_PARAM_PATH).SetString("Language", lang)
+    except Exception:
+        pass
+
+
+def tr(text):
+    return TRANSLATIONS.get(get_lang(), {}).get(text, text)
+
+
+def get_saved_dir():
+    try:
+        return App.ParamGet(PISTOCK_PARAM_PATH).GetString(PARAM_DIR_KEY, "")
+    except Exception:
+        return ""
+
+
+def set_saved_dir(path):
+    try:
+        App.ParamGet(PISTOCK_PARAM_PATH).SetString(PARAM_DIR_KEY, path or "")
+    except Exception:
+        pass
+
+
+# ======================================================================
+#  DÉTECTION DE LA MINIATURE D'UN .FCStd
+# ======================================================================
+def has_thumbnail(path):
+    """True si le .FCStd (archive ZIP) contient déjà une miniature."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            names = set(z.namelist())
+            return ("thumbnails/Thumbnail.png" in names
+                    or "Thumbnail.png" in names)
+    except Exception:
+        return False
+
+
+# ======================================================================
+#  WIDGET PRINCIPAL
+# ======================================================================
+class PiStockThumbnailWidget(QtWidgets.QWidget):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._running = False
+        self._stop = False
+        self._queue = []
+        self._index = 0
+        self._total = 0
+        self._already = 0
+        self.ok = self.warn = self.err = 0
+        self._prev_save_thumb = None
+        self._build_ui()
+        saved = get_saved_dir()
+        if saved:
+            self.path_edit.setText(saved)
+
+    # --- Construction de l'interface --------------------------------
+    def _build_ui(self):
+        main = QtWidgets.QVBoxLayout(self)
+        main.setContentsMargins(20, 20, 20, 20)
+        main.setSpacing(12)
+
+        # Titre + langue
+        title_row = QtWidgets.QHBoxLayout()
+        title = QtWidgets.QLabel("🖼️ " + tr("PiStock Thumbnail Generator"))
+        title.setStyleSheet("font-size: 18px; font-weight: 600;")
+        title_row.addWidget(title)
+        title_row.addStretch()
+        title_row.addWidget(QtWidgets.QLabel(tr("Language:")))
+        self.lang_combo = QtWidgets.QComboBox()
+        self.lang_combo.addItem("EN", "en")
+        self.lang_combo.addItem("FR", "fr")
+        cur = get_lang()
+        for i in range(self.lang_combo.count()):
+            if self.lang_combo.itemData(i) == cur:
+                self.lang_combo.setCurrentIndex(i)
+                break
+        self.lang_combo.currentIndexChanged.connect(self._on_lang_change)
+        title_row.addWidget(self.lang_combo)
+        main.addLayout(title_row)
+
+        # Description
+        desc = QtWidgets.QLabel(tr(
+            "Open each FreeCAD file, fit the view (V,F), save (embeds the "
+            "thumbnail), close. Nothing is recomputed."))
+        desc.setWordWrap(True)
+        desc.setStyleSheet("color: #6b7280; font-size: 12px;")
+        main.addWidget(desc)
+
+        # Dossier master
+        path_row = QtWidgets.QHBoxLayout()
+        path_row.addWidget(QtWidgets.QLabel(tr("Master folder:")))
+        self.path_edit = QtWidgets.QLineEdit()
+        self.path_edit.setPlaceholderText("/home/…")
+        path_row.addWidget(self.path_edit, 1)
+        self.browse_btn = QtWidgets.QPushButton(tr("Browse…"))
+        self.browse_btn.clicked.connect(self._browse)
+        path_row.addWidget(self.browse_btn)
+        main.addLayout(path_row)
+
+        # Options
+        self.skip_chk = QtWidgets.QCheckBox(
+            tr("Skip files that already have a thumbnail (resume-friendly)"))
+        self.skip_chk.setChecked(True)
+        main.addWidget(self.skip_chk)
+
+        self.fit_chk = QtWidgets.QCheckBox(
+            tr("Fit all in view (V,F) before saving — changes the saved "
+               "camera"))
+        self.fit_chk.setChecked(True)
+        main.addWidget(self.fit_chk)
+
+        # Boutons
+        btn_row = QtWidgets.QHBoxLayout()
+        self.start_btn = QtWidgets.QPushButton("▶️  " + tr("Start"))
+        self.start_btn.clicked.connect(self._start)
+        self.start_btn.setStyleSheet(
+            "QPushButton { background:#059669; color:white; font-weight:600;"
+            " padding:6px 16px; border-radius:6px; }"
+            "QPushButton:disabled { background:#a7d7c5; }")
+        btn_row.addWidget(self.start_btn)
+        self.stop_btn = QtWidgets.QPushButton("⏹  " + tr("Stop"))
+        self.stop_btn.clicked.connect(self._request_stop)
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.setStyleSheet(
+            "QPushButton { background:#dc2626; color:white; font-weight:600;"
+            " padding:6px 16px; border-radius:6px; }"
+            "QPushButton:disabled { background:#e5a8a8; }")
+        btn_row.addWidget(self.stop_btn)
+        btn_row.addStretch()
+        main.addLayout(btn_row)
+
+        # Progression
+        self.progress = QtWidgets.QProgressBar()
+        self.progress.setValue(0)
+        main.addWidget(self.progress)
+
+        self.current_label = QtWidgets.QLabel("")
+        self.current_label.setStyleSheet("color: #374151; font-size: 12px;")
+        main.addWidget(self.current_label)
+
+        # Journal
+        self.log_view = QtWidgets.QPlainTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setStyleSheet(
+            "font-family: monospace; font-size: 12px; background:#0f172a;"
+            " color:#e2e8f0; border-radius:6px;")
+        main.addWidget(self.log_view, 1)
+
+    # --- Langue ------------------------------------------------------
+    def _on_lang_change(self):
+        if self._running:
+            return  # pas de changement de langue pendant un traitement
+        new_lang = self.lang_combo.currentData()
+        if not new_lang or new_lang == get_lang():
+            return
+        set_lang(new_lang)
+        QtCore.QTimer.singleShot(0, self._rebuild_ui_after_lang_change)
+
+    def _rebuild_ui_after_lang_change(self):
+        saved_text = self.path_edit.text()
+        old_layout = self.layout()
+        if old_layout is not None:
+            QtWidgets.QWidget().setLayout(old_layout)
+        self._build_ui()
+        self.path_edit.setText(saved_text)
+
+    # --- Parcourir ---------------------------------------------------
+    def _browse(self):
+        start = self.path_edit.text() or os.path.expanduser("~")
+        path = QtWidgets.QFileDialog.getExistingDirectory(
+            self, tr("Choose the master folder"), start)
+        if path:
+            self.path_edit.setText(path)
+
+    # --- Journal -----------------------------------------------------
+    def _log(self, msg):
+        self.log_view.appendPlainText(msg)
+        sb = self.log_view.verticalScrollBar()
+        sb.setValue(sb.maximum())
+        App.Console.PrintMessage("[PiStock-Thumb] " + msg + "\n")
+
+    # --- Préférence miniature ---------------------------------------
+    def _enable_thumbnail_pref(self):
+        p = App.ParamGet(DOC_PARAM_PATH)
+        self._prev_save_thumb = p.GetBool(SAVE_THUMB_KEY, False)
+        p.SetBool(SAVE_THUMB_KEY, True)
+
+    def _restore_thumbnail_pref(self):
+        if self._prev_save_thumb is None:
+            return
+        App.ParamGet(DOC_PARAM_PATH).SetBool(
+            SAVE_THUMB_KEY, self._prev_save_thumb)
+        self._prev_save_thumb = None
+
+    # --- Démarrage ---------------------------------------------------
+    def _start(self):
+        if self._running:
+            return
+        master = self.path_edit.text().strip()
+        set_saved_dir(master)
+        if not master or not os.path.isdir(master):
+            self._log("❌ " + tr("Folder not found: {path}").format(
+                path=master or "—"))
+            return
+
+        self._log(tr("Scanning…"))
+        QtWidgets.QApplication.processEvents()
+
+        # Liste de tous les .FCStd (parcours récursif).
+        files = []
+        for root, dirs, fs in os.walk(master):
+            dirs.sort()
+            for f in sorted(fs):
+                if f.lower().endswith(".fcstd"):
+                    files.append(os.path.join(root, f))
+
+        if not files:
+            self._log("ℹ️ " + tr("No .FCStd file found under this folder."))
+            return
+
+        # Filtrage éventuel des fichiers ayant déjà une miniature.
+        if self.skip_chk.isChecked():
+            todo = [p for p in files if not has_thumbnail(p)]
+        else:
+            todo = list(files)
+
+        self._already = len(files) - len(todo)
+        self._queue = todo
+        self._total = len(todo)
+        self._index = 0
+        self.ok = self.warn = self.err = 0
+
+        if self._total == 0:
+            self._log("✅ " + tr(
+                "Nothing to do — every file already has a thumbnail."))
+            return
+
+        self._log(tr("{n} file(s) to process ({skip} already have a "
+                     "thumbnail).").format(n=self._total, skip=self._already))
+
+        # Active la préférence miniature (restaurée à la fin).
+        self._enable_thumbnail_pref()
+        self._do_fit = self.fit_chk.isChecked()
+
+        # Verrouille l'UI.
+        self._stop = False
+        self._running = True
+        self.start_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+        self.browse_btn.setEnabled(False)
+        self.path_edit.setEnabled(False)
+        self.skip_chk.setEnabled(False)
+        self.fit_chk.setEnabled(False)
+        self.lang_combo.setEnabled(False)
+        self.progress.setMaximum(self._total)
+        self.progress.setValue(0)
+
+        QtCore.QTimer.singleShot(0, self._process_next)
+
+    def _request_stop(self):
+        if self._running:
+            self._stop = True
+            self.current_label.setText("⏳ " + tr("Stop") + "…")
+
+    # --- Boucle de traitement (un fichier par tick) ------------------
+    def _process_next(self):
+        if self._stop or self._index >= len(self._queue):
+            self._finish()
+            return
+
+        path = self._queue[self._index]
+        self._index += 1
+        name = os.path.basename(path)
+        self.current_label.setText(
+            tr("Processing: {name}").format(name=name))
+        self.progress.setValue(self._index)
+        QtWidgets.QApplication.processEvents()
+
+        status, extra = self._process_file(path)
+        if status == "ok":
+            self.ok += 1
+            self._log("✅ {}/{}  {}".format(self._index, self._total, name))
+        elif status == "nothumb":
+            self.warn += 1
+            self._log("⚠️ " + tr(
+                "Saved but thumbnail still missing: {name}").format(name=name))
+        elif status == "open_skip":
+            self._log("⏭️ " + tr(
+                "Already open, skipped to avoid closing your document: "
+                "{name}").format(name=name))
+        else:  # error
+            self.err += 1
+            self._log("❌ {}  —  {}".format(name, extra or ""))
+
+        # Rendre la main à la boucle d'évènements → UI réactive,
+        # bouton « Arrêter » pris en compte entre deux fichiers.
+        QtCore.QTimer.singleShot(0, self._process_next)
+
+    # --- Traitement d'un fichier ------------------------------------
+    def _process_file(self, path):
+        """Ouvre → V,F (option) → save → close. Renvoie (status, extra)."""
+        # Si le document est déjà ouvert dans FreeCAD, on ne le ferme pas
+        # (on ne veut pas perturber le travail en cours de l'utilisateur).
+        norm = os.path.normcase(os.path.normpath(path))
+        for d in App.listDocuments().values():
+            try:
+                if d.FileName and os.path.normcase(
+                        os.path.normpath(d.FileName)) == norm:
+                    return ("open_skip", None)
+            except Exception:
+                pass
+
+        doc = None
+        try:
+            doc = App.openDocument(path)
+            docname = doc.Name
+            App.setActiveDocument(docname)
+
+            if self._do_fit:
+                gui_doc = Gui.getDocument(docname)
+                if gui_doc is not None:
+                    try:
+                        Gui.ActiveDocument = gui_doc
+                    except Exception:
+                        pass
+                    # « V,F » = ajuster la vue pour tout voir.
+                    try:
+                        Gui.SendMsgToActiveView("ViewFit")
+                    except Exception:
+                        pass
+                    try:
+                        view = gui_doc.activeView()
+                        if view is not None and hasattr(view, "fitAll"):
+                            view.fitAll()
+                    except Exception:
+                        pass
+
+            # Laisse la vue se redessiner pour que la capture de miniature
+            # reflète bien le modèle (rendu hors-écran).
+            QtWidgets.QApplication.processEvents()
+            QtWidgets.QApplication.processEvents()
+
+            # Sauvegarde en place : incruste la miniature dans le .FCStd.
+            # Aucun recompute() n'est appelé → le modèle n'est pas recalculé.
+            doc.save()
+
+            App.closeDocument(docname)
+            doc = None
+
+            # Vérification : la miniature a-t-elle bien été écrite ?
+            if has_thumbnail(path):
+                return ("ok", None)
+            return ("nothumb", None)
+
+        except Exception as e:
+            if doc is not None:
+                try:
+                    App.closeDocument(doc.Name)
+                except Exception:
+                    pass
+            return ("error", str(e))
+
+    # --- Fin ---------------------------------------------------------
+    def _finish(self):
+        self._restore_thumbnail_pref()
+        self._running = False
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        self.browse_btn.setEnabled(True)
+        self.path_edit.setEnabled(True)
+        self.skip_chk.setEnabled(True)
+        self.fit_chk.setEnabled(True)
+        self.lang_combo.setEnabled(True)
+        self.current_label.setText("")
+
+        if self._stop:
+            self._log("⏸️ " + tr(
+                "Stopped. {done}/{total} processed in this run.").format(
+                    done=self._index, total=self._total))
+        else:
+            self._log("🏁 " + tr("Finished."))
+
+        self._log(tr(
+            "Summary: {ok} ok, {warn} without thumbnail, {err} error(s), "
+            "{skip} already had one.").format(
+                ok=self.ok, warn=self.warn, err=self.err, skip=self._already))
+
+
+# ======================================================================
+#  INTÉGRATION FreeCAD : sous-fenêtre MDI centrale
+# ======================================================================
+def show_pistock_thumbnail_generator():
+    mw = Gui.getMainWindow()
+    if mw is None:
+        App.Console.PrintError("Pas de fenêtre principale FreeCAD.\n")
+        return
+    mdi = mw.findChild(QtWidgets.QMdiArea)
+    if mdi is None:
+        App.Console.PrintError(
+            "Impossible de trouver la zone MDI centrale de FreeCAD.\n")
+        return
+
+    # Réutilise une instance existante si présente.
+    for sub in mdi.subWindowList():
+        if sub.windowTitle() == "PiStock Thumbnail Generator":
+            sub.show()
+            mdi.setActiveSubWindow(sub)
+            return
+
+    widget = PiStockThumbnailWidget()
+    sub = QtWidgets.QMdiSubWindow()
+    sub.setWidget(widget)
+    sub.setWindowTitle("PiStock Thumbnail Generator")
+    sub.setAttribute(QtCore.Qt.WA_DeleteOnClose)
+    mdi.addSubWindow(sub)
+    sub.showMaximized()
+
+
+# Lancement
+show_pistock_thumbnail_generator()
