@@ -75,6 +75,8 @@ TRANSLATIONS = {
         "Scanning…": "Analyse…",
         "(no thumbnail)": "(pas de vignette)",
         "Click to open « {name} »": "Cliquer pour ouvrir « {name} »",
+        "Open this folder in the file manager":
+            "Ouvrir ce dossier dans le gestionnaire de fichiers",
         "PiStock — Error": "PiStock — Erreur",
         "Cannot open « {name} » :\n{err}":
             "Impossible d'ouvrir « {name} » :\n{err}",
@@ -223,7 +225,14 @@ class PiStockLocalExplorerWidget(QtWidgets.QWidget):
 
         # --- Bandeau titre + langue ----------------------------------
         title_row = QtWidgets.QHBoxLayout()
-        title = QtWidgets.QLabel("📁 " + tr("PiStock Local Explorer"))
+        # Qt standard folder icon instead of an emoji: emojis may be
+        # missing from the system font (notably on Linux) and render as
+        # an empty box.
+        title_icon = QtWidgets.QLabel()
+        title_icon.setPixmap(self.style().standardIcon(
+            QtWidgets.QStyle.StandardPixmap.SP_DirIcon).pixmap(22, 22))
+        title_row.addWidget(title_icon)
+        title = QtWidgets.QLabel(tr("PiStock Local Explorer"))
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
         title_row.addWidget(title)
         title_row.addStretch()
@@ -398,10 +407,25 @@ class PiStockLocalExplorerWidget(QtWidgets.QWidget):
         header.setSpacing(8)
         is_master = (depth == 0)
         name = tr("(master)") if is_master else os.path.basename(path)
-        folder_lbl = QtWidgets.QLabel("📁 " + name)
-        folder_lbl.setStyleSheet(
-            "font-weight: 600; font-size: 13px; color: #065f46;")
-        header.addWidget(folder_lbl)
+        # Qt standard folder icon (reliable everywhere, unlike an emoji).
+        icon_lbl = QtWidgets.QLabel()
+        icon_lbl.setPixmap(self.style().standardIcon(
+            QtWidgets.QStyle.StandardPixmap.SP_DirIcon).pixmap(16, 16))
+        header.addWidget(icon_lbl)
+        # Clickable folder name → open the folder in the OS file manager
+        # (handy to reach the other file formats sitting next to the CAD).
+        folder_btn = QtWidgets.QPushButton(name)
+        folder_btn.setFlat(True)
+        folder_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        folder_btn.setStyleSheet(
+            "QPushButton { font-weight:600; font-size:13px; color:#065f46;"
+            " border:none; background:transparent; text-align:left;"
+            " padding:0 2px; }"
+            " QPushButton:hover { text-decoration: underline; }")
+        folder_btn.setToolTip(tr("Open this folder in the file manager"))
+        folder_btn.clicked.connect(
+            lambda checked=False, p=path: self._open_in_os(p))
+        header.addWidget(folder_btn)
         if not is_master:
             rel = os.path.relpath(path, self.path_edit.text().strip())
             rel_lbl = QtWidgets.QLabel(rel)
@@ -438,6 +462,17 @@ class PiStockLocalExplorerWidget(QtWidgets.QWidget):
             v.addWidget(strip)
 
         return block
+
+    # --- Ouverture d'un dossier dans le gestionnaire de fichiers -----
+    def _open_in_os(self, path):
+        """Ouvre le dossier dans l'explorateur de fichiers de l'OS
+        (multi-plateforme via QDesktopServices → xdg-open / Finder /
+        Explorer)."""
+        try:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(path))
+        except Exception as e:
+            App.Console.PrintError(
+                f"❌ Impossible d'ouvrir le dossier '{path}' : {e}\n")
 
     # --- Ouverture d'un fichier -------------------------------------
     def _open_file(self, path):
