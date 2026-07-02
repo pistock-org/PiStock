@@ -534,6 +534,32 @@ def create_part_in_db(part_name: str):
         return (True, f"Pièce '{part_name}' créée (id={part.id}).", part.id)
 
 
+def rename_part_db(part_id: int, new_name: str):
+    """Rename a part (its unique part_name). Blocked if the part is
+    locked (like the other structural edits). Returns (ok, msg)."""
+    engine, Parts, _, _, _ = _db()
+    new_name = (new_name or "").strip()
+    if not new_name:
+        return (False, "Le nom de la pièce est obligatoire.")
+    with Session(engine) as session:
+        part = session.get(Parts, part_id)
+        if part is None:
+            return (False, "Pièce introuvable.")
+        if part.locked:
+            return (False, f"Pièce '{part.part_name}' verrouillée.")
+        if new_name == part.part_name:
+            return (True, "Nom inchangé.")
+        clash = session.exec(
+            select(Parts).where(Parts.part_name == new_name)
+        ).first()
+        if clash is not None and clash.id != part_id:
+            return (False, f"Une pièce nommée '{new_name}' existe déjà.")
+        part.part_name = new_name
+        session.add(part)
+        session.commit()
+        return (True, f"Pièce renommée en '{new_name}'.")
+
+
 # ----------------------------------------------------------------------
 #  PROJECTS
 # ----------------------------------------------------------------------
@@ -565,6 +591,20 @@ def create_project_in_db(description: str):
         session.commit()
         session.refresh(project)
         return (True, f"Collection '{code}' créée.", code)
+
+
+def rename_project_db(project_id: int, new_description: str):
+    """Rename a collection = change its description (its display name).
+    The code stays as the stable identifier. Returns (ok, msg)."""
+    import main
+    with Session(main.engine) as session:
+        project = session.get(main.Project, project_id)
+        if project is None:
+            return (False, "Collection introuvable.")
+        project.description = (new_description or "").strip() or None
+        session.add(project)
+        session.commit()
+        return (True, f"Collection « {project.code} » renommée.")
 
 
 # ----------------------------------------------------------------------

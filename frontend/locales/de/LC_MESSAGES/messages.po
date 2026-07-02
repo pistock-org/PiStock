@@ -592,3 +592,18 @@ msgstr "Dieses Teil als Referenz (Geist) in einem anderen Sammlung anzeigen, nur
 
 msgid "← Back"
 msgstr "← Zurück"
+
+msgid "Rename"
+msgstr "Umbenennen"
+
+msgid "Rename this collection"
+msgstr "Diese Sammlung umbenennen"
+
+msgid "Rename collection {code}"
+msgstr "Sammlung {code} umbenennen"
+
+msgid "Rename this part"
+msgstr "Dieses Teil umbenennen"
+
+msgid "Unlock the part to rename it."
+msgstr "Entsperren Sie das Teil, um es umzubenennen."

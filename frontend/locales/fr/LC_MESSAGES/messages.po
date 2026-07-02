@@ -592,3 +592,18 @@ msgstr "Afficher cette pièce comme référence (fantôme) dans une autre collec
 
 msgid "← Back"
 msgstr "← Retour"
+
+msgid "Rename"
+msgstr "Renommer"
+
+msgid "Rename this collection"
+msgstr "Renommer cette collection"
+
+msgid "Rename collection {code}"
+msgstr "Renommer la collection {code}"
+
+msgid "Rename this part"
+msgstr "Renommer cette pièce"
+
+msgid "Unlock the part to rename it."
+msgstr "Déverrouillez la pièce pour la renommer."

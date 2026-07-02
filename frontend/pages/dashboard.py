@@ -30,7 +30,7 @@ from app_core import (_apply_user_lang, _register_pwa)
 from components.header import render_app_header
 from components.admin import (_admin_configured, _open_admin_setup_dialog, _ensure_admin)
 from plugin_hooks import collect_part_badges
-from db import (UNASSIGNED, fetch_parts_full, fetch_last_used_project_id, assign_project_to_part, set_part_status_db, set_part_info_db, toggle_part_lock_db, fetch_stock, save_stock, create_part_in_db, fetch_projects, create_project_in_db, fetch_boms, fetch_bom_detail, create_bom_db, delete_bom_db, delete_part_db, add_bom_line_db, update_bom_line_db, delete_bom_line_db, bom_stock_apply, delete_project_db, fetch_part_ghost_projects, add_part_ghost, remove_part_ghost)
+from db import (UNASSIGNED, fetch_parts_full, fetch_last_used_project_id, assign_project_to_part, set_part_status_db, set_part_info_db, toggle_part_lock_db, fetch_stock, save_stock, create_part_in_db, rename_part_db, fetch_projects, create_project_in_db, rename_project_db, fetch_boms, fetch_bom_detail, create_bom_db, delete_bom_db, delete_part_db, add_bom_line_db, update_bom_line_db, delete_bom_line_db, bom_stock_apply, delete_project_db, fetch_part_ghost_projects, add_part_ghost, remove_part_ghost)
 
 
 # ======================================================================
@@ -676,6 +676,15 @@ def dashboard_page(project: str | None = None):
                                     ui.label(_("(no description)")) \
                                         .classes("text-sm text-gray-400 "
                                                   "italic flex-grow")
+                                # Rename button (edit the description)
+                                def _make_rename(p=proj):
+                                    return lambda: _open_rename_project(p)
+                                ui.button(
+                                    icon="edit",
+                                    on_click=_make_rename()) \
+                                    .props("flat round dense color=grey-6") \
+                                    .classes("flex-shrink-0") \
+                                    .tooltip(_("Rename this collection"))
                                 # Delete button (admin + empty project)
                                 def _make_del(p=proj):
                                     def h():
@@ -692,6 +701,34 @@ def dashboard_page(project: str | None = None):
                                     .props("flat round dense color=grey-6") \
                                     .classes("flex-shrink-0") \
                                     .tooltip(_("Delete this project"))
+
+            def _open_rename_project(proj):
+                """Small dialog to rename a collection (edit its
+                description). Refreshes the list + the filter on success."""
+                with ui.dialog() as rdlg, \
+                        ui.card().classes("min-w-[420px] gap-2"):
+                    ui.label(_("Rename collection {code}").format(
+                        code=proj["code"])).classes("text-lg font-medium")
+                    rdesc = ui.textarea(
+                        placeholder=_("Description (optional)"),
+                        value=proj["description"] or "") \
+                        .classes("w-full").props("autogrow rows=3")
+                    with ui.row().classes("w-full justify-end gap-2 mt-2"):
+                        ui.button(_("Cancel"), on_click=rdlg.close).props("flat")
+
+                        def _do_rename():
+                            ok, msg = rename_project_db(
+                                proj["id"], rdesc.value or "")
+                            if not ok:
+                                ui.notify(msg, type="negative")
+                                return
+                            ui.notify(msg, type="positive")
+                            rdlg.close()
+                            refresh_projects_list()
+                            refresh_project_filter()
+                        ui.button(_("Save"), on_click=_do_rename) \
+                            .props("color=primary")
+                rdlg.open()
 
             def show_creation_form():
                 desc_input.value = ""
@@ -1146,6 +1183,35 @@ def open_part_options_dialog(part: dict, on_change):
         if meta_bits:
             ui.label(" • ".join(meta_bits)) \
                 .classes("text-xs text-gray-500")
+
+        ui.separator()
+
+        # --- Rename this part ---------------------------------------
+        # A locked part is frozen (like project/status edits), so the
+        # rename is offered only when unlocked.
+        with ui.column().classes("w-full gap-2 mt-2"):
+            ui.label(_("Rename this part")).classes("text-sm font-medium")
+            if part.get("locked"):
+                ui.label(_("Unlock the part to rename it.")) \
+                    .classes("text-xs text-gray-500")
+            else:
+                with ui.row().classes("w-full items-end gap-2 no-wrap"):
+                    rename_in = ui.input(_("Part name"),
+                                         value=part["part_name"]) \
+                        .classes("flex-grow")
+
+                    def _do_rename_part():
+                        ok, msg = rename_part_db(
+                            part["id"], rename_in.value or "")
+                        if ok:
+                            ui.notify(msg, type="positive")
+                            dialog.close()
+                            on_change()
+                        else:
+                            ui.notify(msg, type="negative")
+                    rename_in.on("keydown.enter", lambda: _do_rename_part())
+                    ui.button(_("Rename"), on_click=_do_rename_part) \
+                        .props("color=primary outline")
 
         ui.separator()
 
