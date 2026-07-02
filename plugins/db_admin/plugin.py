@@ -110,6 +110,19 @@ T = {
         "browse": "Browse…", "pick_title": "Choose a folder",
         "select_folder": "Select this folder", "parent": "Parent folder",
         "home": "Home", "no_subdirs": "(no subfolders)",
+        "cmp_title": "Compress images",
+        "cmp_hint": "Scan every photo in the notes and stock and shrink the heavy ones in place (e.g. 2 MB → 200 KB): images are downscaled and re-encoded, paths are unchanged. Lossy and irreversible — run an Export first.",
+        "cmp_min": "Skip files under (KB)", "cmp_maxdim": "Max size (px)",
+        "cmp_quality": "JPEG/WEBP quality",
+        "cmp_scan": "Scan", "cmp_run": "Compress…", "cmp_stop": "Stop",
+        "cmp_scanres": "{n} image(s) ≥ {kb} KB — total {size}.",
+        "cmp_none": "No image to compress with these settings.",
+        "cmp_pillow": "The Pillow library is required for this tool. Install it (pip install Pillow) and reload.",
+        "cmp_confirm_t": "Confirm compression",
+        "cmp_confirm_b": "This re-encodes {n} image(s) in place ({size}). It is lossy and IRREVERSIBLE — make sure you have an Export/backup. Continue?",
+        "cmp_progress": "Compressing {i}/{n}…",
+        "cmp_done": "Done: {n} image(s) compressed, {size_saved} saved ({before} → {after}). {skip} left unchanged, {err} error(s).",
+        "cmp_stopped": "Stopped: {n} image(s) compressed, {size_saved} saved so far.",
     },
     "fr": {
         "title": "Admin base de données", "plugins": "Plugins", "catalog": "Catalogue",
@@ -165,6 +178,19 @@ T = {
         "browse": "Parcourir…", "pick_title": "Choisir un dossier",
         "select_folder": "Choisir ce dossier", "parent": "Dossier parent",
         "home": "Accueil", "no_subdirs": "(aucun sous-dossier)",
+        "cmp_title": "Compresser les images",
+        "cmp_hint": "Parcourt toutes les photos des notes et du stock et allège les plus lourdes sur place (ex. 2 Mo → 200 Ko) : les images sont réduites et ré-encodées, les chemins ne changent pas. Avec perte et irréversible — faites un Export d'abord.",
+        "cmp_min": "Ignorer les fichiers < (Ko)", "cmp_maxdim": "Taille max (px)",
+        "cmp_quality": "Qualité JPEG/WEBP",
+        "cmp_scan": "Analyser", "cmp_run": "Compresser…", "cmp_stop": "Arrêter",
+        "cmp_scanres": "{n} image(s) ≥ {kb} Ko — total {size}.",
+        "cmp_none": "Aucune image à compresser avec ces réglages.",
+        "cmp_pillow": "La bibliothèque Pillow est requise pour cet outil. Installez-la (pip install Pillow) puis rechargez.",
+        "cmp_confirm_t": "Confirmer la compression",
+        "cmp_confirm_b": "Ceci ré-encode {n} image(s) sur place ({size}). C'est avec perte et IRRÉVERSIBLE — assurez-vous d'avoir un Export/sauvegarde. Continuer ?",
+        "cmp_progress": "Compression {i}/{n}…",
+        "cmp_done": "Terminé : {n} image(s) compressée(s), {size_saved} gagnés ({before} → {after}). {skip} inchangée(s), {err} erreur(s).",
+        "cmp_stopped": "Arrêté : {n} image(s) compressée(s), {size_saved} gagnés jusqu'ici.",
     },
     "de": {
         "title": "Datenbank-Admin", "plugins": "Plugins", "catalog": "Katalog",
@@ -220,6 +246,19 @@ T = {
         "browse": "Durchsuchen…", "pick_title": "Ordner wählen",
         "select_folder": "Diesen Ordner wählen", "parent": "Übergeordneter Ordner",
         "home": "Start", "no_subdirs": "(keine Unterordner)",
+        "cmp_title": "Bilder komprimieren",
+        "cmp_hint": "Durchsucht alle Fotos in Notizen und Lager und verkleinert die schweren an Ort und Stelle (z. B. 2 MB → 200 KB): Bilder werden herunterskaliert und neu kodiert, Pfade bleiben unverändert. Verlustbehaftet und unumkehrbar — vorher einen Export machen.",
+        "cmp_min": "Dateien überspringen unter (KB)", "cmp_maxdim": "Max. Größe (px)",
+        "cmp_quality": "JPEG/WEBP-Qualität",
+        "cmp_scan": "Scannen", "cmp_run": "Komprimieren…", "cmp_stop": "Stopp",
+        "cmp_scanres": "{n} Bild(er) ≥ {kb} KB — insgesamt {size}.",
+        "cmp_none": "Kein Bild zum Komprimieren mit diesen Einstellungen.",
+        "cmp_pillow": "Die Pillow-Bibliothek wird für dieses Werkzeug benötigt. Installieren (pip install Pillow) und neu laden.",
+        "cmp_confirm_t": "Komprimierung bestätigen",
+        "cmp_confirm_b": "Dies kodiert {n} Bild(er) an Ort und Stelle neu ({size}). Verlustbehaftet und UNUMKEHRBAR — stellen Sie sicher, dass Sie einen Export/eine Sicherung haben. Fortfahren?",
+        "cmp_progress": "Komprimiere {i}/{n}…",
+        "cmp_done": "Fertig: {n} Bild(er) komprimiert, {size_saved} gespart ({before} → {after}). {skip} unverändert, {err} Fehler.",
+        "cmp_stopped": "Gestoppt: {n} Bild(er) komprimiert, {size_saved} bisher gespart.",
     },
 }
 
@@ -757,6 +796,95 @@ def _open_folder_picker(target_input):
 # ======================================================================
 #  PAGE
 # ======================================================================
+# ----------------------------------------------------------------------
+#  IMAGE COMPRESSION — shrink notes & stock photos IN PLACE
+# ----------------------------------------------------------------------
+# Images are referenced by relative path across the DB (stock photos,
+# whiteboard notes, fab notes, PLM thumbnails). We therefore compress
+# them in place, keeping the SAME path and extension so every reference
+# stays valid. Only overwrite when the re-encoded file is actually
+# smaller. Lossy — the UI warns and recommends an Export first.
+IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+def _pillow():
+    try:
+        from PIL import Image, ImageOps
+        return Image, ImageOps
+    except Exception:
+        return None, None
+
+
+def _human_size(n):
+    n = float(n)
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+
+
+def _safe_size(path):
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def _iter_images(data_dir):
+    """Yield absolute paths of image files under data-pistock/uploads/."""
+    up = os.path.join(data_dir, "uploads")
+    if not os.path.isdir(up):
+        return
+    for root, _dirs, files in os.walk(up):
+        for f in files:
+            if os.path.splitext(f)[1].lower() in IMG_EXTS:
+                yield os.path.join(root, f)
+
+
+def scan_images(data_dir, min_kb=0):
+    """(count, total_bytes) of images >= min_kb under uploads/."""
+    n = total = 0
+    for p in _iter_images(data_dir):
+        sz = _safe_size(p)
+        if sz >= min_kb * 1024:
+            n += 1
+            total += sz
+    return n, total
+
+
+def compress_one(path, max_dim, quality):
+    """Compress a single image in place. Downscale so the longest side is
+    <= max_dim (never upscales) and re-encode. Keeps the same path &
+    extension. Returns (before, after, changed); only writes (changed=
+    True) when the result is strictly smaller."""
+    import io
+    Image, ImageOps = _pillow()
+    if Image is None:
+        raise RuntimeError("pillow_missing")
+    before = _safe_size(path)
+    ext = os.path.splitext(path)[1].lower()
+    with Image.open(path) as im:
+        im = ImageOps.exif_transpose(im)          # bake in orientation
+        im.thumbnail((max_dim, max_dim))          # shrink only, keep ratio
+        buf = io.BytesIO()
+        if ext in (".jpg", ".jpeg"):
+            im.convert("RGB").save(buf, format="JPEG", quality=quality,
+                                   optimize=True, progressive=True)
+        elif ext == ".png":
+            im.save(buf, format="PNG", optimize=True)
+        elif ext == ".webp":
+            im.save(buf, format="WEBP", quality=quality, method=6)
+        else:
+            return (before, before, False)
+    data = buf.getvalue()
+    after = len(data)
+    if 0 < after < before:
+        with open(path, "wb") as f:
+            f.write(data)
+        return (before, after, True)
+    return (before, before, False)
+
+
 def register(app):
     from nicegui import ui
 
@@ -976,6 +1104,132 @@ def register(app):
                     wres.classes(replace="text-sm " + ("text-green-700" if ok else "text-red-600"))
                     ui.notify(msg, type="positive" if ok else "negative")
                 ui.button(_tr("run_wb"), on_click=do_wb).props("color=primary")
+
+            # --- COMPRESS IMAGES ---
+            with ui.card().classes("w-full p-4 gap-2"):
+                ui.label("🗜️ " + _tr("cmp_title")).classes("text-lg font-medium")
+                ui.label(_tr("cmp_hint")).classes("text-sm text-gray-600")
+
+                _img_mod, _ = _pillow()
+                if _img_mod is None:
+                    ui.label("⚠ " + _tr("cmp_pillow")) \
+                        .classes("text-sm text-amber-700")
+                else:
+                    with ui.row().classes("w-full items-end gap-3 flex-wrap"):
+                        min_in = ui.number(_tr("cmp_min"), value=300,
+                                           min=0, step=50) \
+                            .props("dense").classes("w-44")
+                        dim_in = ui.number(_tr("cmp_maxdim"), value=1600,
+                                           min=200, step=100) \
+                            .props("dense").classes("w-36")
+                        q_in = ui.number(_tr("cmp_quality"), value=80,
+                                         min=30, max=95, step=5) \
+                            .props("dense").classes("w-36")
+
+                    cmp_res = ui.label("").classes("text-sm text-gray-700")
+                    cmp_prog = ui.linear_progress(value=0, show_value=False) \
+                        .classes("w-full")
+                    cmp_prog.set_visibility(False)
+                    cmp_cur = ui.label("").classes("text-xs text-gray-500")
+                    cmp_state = {"stop": False}
+
+                    def _min_kb():
+                        return int(min_in.value or 0)
+
+                    def do_scan():
+                        n, total = scan_images(main.DATA_DIR, _min_kb())
+                        cmp_res.classes(replace="text-sm text-gray-700")
+                        cmp_res.text = _tr("cmp_none") if n == 0 else \
+                            _tr("cmp_scanres").format(
+                                n=n, kb=_min_kb(), size=_human_size(total))
+
+                    async def _run_compress():
+                        from nicegui import run
+                        files = [p for p in _iter_images(main.DATA_DIR)
+                                 if _safe_size(p) >= _min_kb() * 1024]
+                        n = len(files)
+                        if n == 0:
+                            cmp_res.text = _tr("cmp_none")
+                            return
+                        cmp_state["stop"] = False
+                        max_dim = int(dim_in.value or 1600)
+                        quality = int(q_in.value or 80)
+                        scan_btn.set_enabled(False)
+                        start_btn.set_enabled(False)
+                        stop_btn.set_enabled(True)
+                        cmp_prog.set_visibility(True)
+                        cmp_prog.set_value(0)
+                        done = skipped = errs = 0
+                        before_t = after_t = saved = 0
+                        for i, path in enumerate(files):
+                            if cmp_state["stop"]:
+                                break
+                            try:
+                                before, after, changed = await run.io_bound(
+                                    compress_one, path, max_dim, quality)
+                                before_t += before
+                                after_t += after
+                                if changed:
+                                    done += 1
+                                    saved += (before - after)
+                                else:
+                                    skipped += 1
+                            except Exception:  # noqa: BLE001
+                                errs += 1
+                            cmp_prog.set_value((i + 1) / n)
+                            cmp_cur.text = _tr("cmp_progress").format(
+                                i=i + 1, n=n)
+                        scan_btn.set_enabled(True)
+                        start_btn.set_enabled(True)
+                        stop_btn.set_enabled(False)
+                        cmp_cur.text = ""
+                        cmp_prog.set_visibility(False)
+                        key = "cmp_stopped" if cmp_state["stop"] else "cmp_done"
+                        msg = _tr(key).format(
+                            n=done, size_saved=_human_size(saved),
+                            before=_human_size(before_t),
+                            after=_human_size(after_t),
+                            skip=skipped, err=errs)
+                        cmp_res.classes(replace="text-sm text-green-700")
+                        cmp_res.text = msg
+                        ui.notify(msg, type="positive")
+
+                    def do_compress():
+                        n, total = scan_images(main.DATA_DIR, _min_kb())
+                        if n == 0:
+                            do_scan()
+                            return
+                        with ui.dialog() as cdlg, \
+                                ui.card().classes("min-w-[420px]"):
+                            ui.label(_tr("cmp_confirm_t")) \
+                                .classes("text-lg font-bold")
+                            ui.label(_tr("cmp_confirm_b").format(
+                                n=n, size=_human_size(total))) \
+                                .classes("text-sm text-gray-700 "
+                                         "whitespace-pre-line")
+                            with ui.row().classes(
+                                    "w-full justify-end gap-2 mt-2"):
+                                ui.button(_tr("cancel"),
+                                          on_click=cdlg.close).props("flat")
+
+                                async def _go():
+                                    cdlg.close()
+                                    await _run_compress()
+                                ui.button(_tr("confirm_btn"), on_click=_go) \
+                                    .props("color=warning")
+                        cdlg.open()
+
+                    with ui.row().classes("w-full items-center gap-2"):
+                        scan_btn = ui.button(_tr("cmp_scan"),
+                                             on_click=do_scan).props("outline")
+                        start_btn = ui.button(_tr("cmp_run"),
+                                              on_click=do_compress) \
+                            .props("color=primary")
+                        stop_btn = ui.button(
+                            _tr("cmp_stop"),
+                            on_click=lambda: cmp_state.update(stop=True)) \
+                            .props("color=negative outline")
+                        stop_btn.set_enabled(False)
 
     def _confirm_dialog(title, body, on_confirm):
         from nicegui import ui
